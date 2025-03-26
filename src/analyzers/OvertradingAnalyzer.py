@@ -19,6 +19,19 @@ class OvertradingAnalyzer:
         # Get or initialize user state
         user_state = self._get_user_state(job.user_id)
 
+        # Check single job limit
+        if job.amount > user_limits.max_position_size:
+            level = 95.0  # High risk for exceeding single job limit
+            max_level = max(max_level, level)
+            triggers.append({
+                "job_id": job.job_id,
+                "message": "Single job limit exceeded",
+                "details": {
+                    "job_amount": job.amount,
+                    "limit": user_limits.max_position_size
+                }
+            })
+
         # Check daily trade limit
         if self._check_daily_trade_limit(user_state, user_limits):
             level = 90.0
