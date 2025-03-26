@@ -1,0 +1,5 @@
+requests==2.32.0
+pydantic==2.6.1
+python-dotenv==1.0.0
+six==1.16.0
+confluent-kafka==2.8.2 
