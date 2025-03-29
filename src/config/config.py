@@ -9,6 +9,7 @@ class Config:
     # Loging
     LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO').upper()
     LOG_LEVEL_KAFKA = os.getenv('LOG_LEVEL_KAFKA', 'INFO').upper()
+    LOG_LEVEL_JOB_PROCESSOR = os.getenv('LOG_LEVEL_JOB_PROCESSOR', 'INFO').upper()
 
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:19092')
@@ -32,6 +33,8 @@ class Config:
             return "LOG_LEVEL is not set"
         if not cls.LOG_LEVEL_KAFKA:
             return "LOG_LEVEL_KAFKA is not set"
+        if not cls.LOG_LEVEL_JOB_PROCESSOR:
+            return "LOG_LEVEL_JOB_PROCESSOR is not set"
         if not cls.API_BASE_URL:
             return "API_BASE_URL is not set"
         if not cls.API_USER_LIMITS_PATH:

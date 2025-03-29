@@ -7,6 +7,10 @@ BASE_LOGGER_PREFIX = 'tradeguard.health'
 log_file = get_log_file_path()
 log_file.parent.mkdir(parents=True, exist_ok=True)
 
+global_level = Config.LOG_LEVEL
+kafka_level = global_level if (global_level == "DEBUG") else Config.LOG_LEVEL_KAFKA
+job_processor_level = global_level if (global_level == "DEBUG") else Config.LOG_LEVEL_JOB_PROCESSOR
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -29,22 +33,26 @@ LOGGING_CONFIG = {
     "loggers": {
         BASE_LOGGER_PREFIX: {
             "handlers": ["console", "file"],
-            "level": Config.LOG_LEVEL,
+            "level": global_level,
             "propagate": False,
         },
         f"{BASE_LOGGER_PREFIX}.kafka_handler": {
             "handlers": ["console", "file"],
-            "level": Config.LOG_LEVEL_KAFKA,
+            "level": kafka_level,
+            "propagate": False,
+        },
+        f"{BASE_LOGGER_PREFIX}.job_processor": {
+            "handlers": ["console", "file"],
+            "level": job_processor_level,
             "propagate": False,
         },
     },
 }
 
 
-def setup_logging() -> logging.Logger:
+def setup_logging() -> None:
     """Set up logging using dictConfig."""
     logging.config.dictConfig(LOGGING_CONFIG)
-    return logging.getLogger(BASE_LOGGER_PREFIX)
 
 
 def get_logger(suffix: str = None) -> logging.Logger:

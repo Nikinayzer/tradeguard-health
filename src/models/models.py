@@ -3,20 +3,26 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger('trade_guide_health')
+from src.utils import log_util
+
+logger = log_util.get_logger()
+
 
 class Job(BaseModel):
     job_id: int
     user_id: int
     event_type: str
-    name: str
-    coins: List[str]
-    side: str
-    discount_pct: float
-    amount: float
-    steps_total: int
-    duration_minutes: float
+    name: Optional[str] = ""
+    coins: List[str] = []
+    side: Optional[str] = ""
+    discount_pct: float = 0.0
+    amount: float = 0.0
+    steps_total: int = 0
+    duration_minutes: float = 0.0
     timestamp: str
+    status: Optional[str] = ""
+    completed_steps: Optional[int] = 0
+    orders: Optional[List[Dict[str, Any]]] = []
 
     @property
     def id(self) -> int:
@@ -25,28 +31,30 @@ class Job(BaseModel):
 
     @property
     def created_at(self) -> str:
-        """Alias for timestamp to maintain compatibility with existing code"""
+        """Alias for timestamp"""
         return self.timestamp
 
     @property
     def updated_at(self) -> str:
-        """Alias for timestamp to maintain compatibility with existing code"""
+        """Alias for timestamp"""
         return self.timestamp
 
     @property
-    def status(self) -> str:
-        """Map event_type to status for compatibility"""
+    def job_status(self) -> str:
+        """Return status if available, otherwise map event_type to status for compatibility"""
+        if self.status:
+            return self.status
         return self.event_type
 
     @property
     def strategy(self) -> str:
-        """Alias for name to maintain compatibility"""
+        """Alias for name"""
         return self.name
 
     @property
     def steps_done(self) -> int:
-        """Default to 0 for new jobs"""
-        return 0
+        """Return completed_steps if available, otherwise default to 0"""
+        return self.completed_steps
 
     @property
     def params(self) -> dict:
@@ -76,7 +84,7 @@ class UserLimits(BaseModel):
 
     @property
     def user_id(self) -> int:
-        """Alias for userId to maintain compatibility with existing code"""
+        """Alias for userId"""
         return self.userId
 
     @property
@@ -97,7 +105,7 @@ class UserLimits(BaseModel):
     @property
     def max_trade_interval_minutes(self) -> int:
         """Default value for max trade interval"""
-        return 1440  # 24 hours in minutes
+        return 1440  # 24 hours
 
     @property
     def max_concurrent_jobs(self) -> int:
@@ -114,25 +122,25 @@ class UserLimits(BaseModel):
         """Alias for maxSingleJobLimit"""
         return self.maxSingleJobLimit
 
-    @property
-    def max_leverage(self) -> float:
-        """Default value for max leverage"""
-        return 1.0
+    # @property
+    # def max_leverage(self) -> float:
+    #     """Default value for max leverage"""
+    #     return 1.0
 
-    @property
-    def allowed_strategies(self) -> List[str]:
-        """Convert boolean flags to list of allowed strategies"""
-        strategies = []
-        if self.allowDcaForce:
-            strategies.append("dca")
-        if self.allowLiqForce:
-            strategies.append("liq")
-        return strategies
+    # @property
+    # def allowed_strategies(self) -> List[str]:
+    #     """Convert boolean flags to list of allowed strategies"""
+    #     strategies = []
+    #     if self.allowDcaForce:
+    #         strategies.append("dca")
+    #     if self.allowLiqForce:
+    #         strategies.append("liq")
+    #     return strategies
 
-    @property
-    def allowed_coins(self) -> List[str]:
-        """Default list of allowed coins"""
-        return ["BTC", "ETH", "DOGE"]  # Add more as needed
+    # @property
+    # def allowed_coins(self) -> List[str]:
+    #     """Default list of allowed coins"""
+    #     return ["BTC", "ETH", "DOGE"]  # Add more as needed
 
 
 class Risk(BaseModel):
@@ -152,4 +160,4 @@ class RiskReport(BaseModel):
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     type: str = "overtrading"
     level: float = Field(description="Overall risk level as a percentage (0-100)")
-    triggers: List[Dict[str, Any]] = Field(description="List of all triggers that caused risks") 
+    triggers: List[Dict[str, Any]] = Field(description="List of all triggers that caused risks")
