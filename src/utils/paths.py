@@ -16,4 +16,4 @@ def get_logs_dir() -> Path:
 
 def get_log_file_path() -> Path:
     """Get the absolute path to the log file"""
-    return get_logs_dir() / 'trade_guide_health.log'
+    return get_logs_dir() / 'tradeguard_health_log'

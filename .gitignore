@@ -1,3 +1,4 @@
 /.env
 /logs/trade_guide_health.log
 /.idea
+/logs/
