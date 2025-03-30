@@ -21,6 +21,11 @@ class Config:
     API_BASE_URL: str = os.getenv('API_BASE_URL', 'http://localhost:8080')
     API_USER_LIMITS_PATH: str = os.getenv('API_USER_LIMITS_PATH', '/api/users/{user_id}/limits')
 
+    # Web Dashboard
+    ENABLE_WEB_DASHBOARD: bool = os.getenv('ENABLE_WEB_DASHBOARD', 'true').lower() in ('true', 'yes', '1')
+    DASHBOARD_HOST: str = os.getenv('DASHBOARD_HOST', '0.0.0.0')
+    DASHBOARD_PORT: int = int(os.getenv('DASHBOARD_PORT', '8081'))
+
     @classmethod
     def get_user_limits_url(cls, user_id: int) -> str:
         """Get the full URL for user limits API endpoint"""
