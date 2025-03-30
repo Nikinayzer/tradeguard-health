@@ -23,6 +23,7 @@ class Config:
 
     # Web Dashboard
     ENABLE_WEB_DASHBOARD: bool = os.getenv('ENABLE_WEB_DASHBOARD', 'true').lower() in ('true', 'yes', '1')
+    DASHBOARD_REFRESH_RATE: int = int(os.getenv('DASHBOARD_REFRESH_RATE', '2'))
     DASHBOARD_HOST: str = os.getenv('DASHBOARD_HOST', '0.0.0.0')
     DASHBOARD_PORT: int = int(os.getenv('DASHBOARD_PORT', '8081'))
 
