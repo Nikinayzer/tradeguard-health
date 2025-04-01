@@ -1,151 +1,121 @@
-"""
-Job Event Models
-
-This module defines the models for job events coming from Kafka.
-It mirrors the Java implementation with proper deserialization logic.
-"""
-
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Union, Optional
 from datetime import datetime
+from typing import List, Dict, Any, Type, Union
+import logging
 
-from src.utils import log_util
-
-logger = log_util.get_logger()
+logger = logging.getLogger(__name__)
 
 
-@dataclass
-class JobEventType:
-    """Base class for all job event types"""
-    type_name: str = field(default="", init=False)
+# ------------------------------------------------------------------------------
+# Base Classes and Registry
+# ------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class JobEventType(ABC):
+    type_name: str = field(init=False)
 
     @classmethod
-    def from_dict(cls, data: Union[str, Dict[str, Any]]) -> 'JobEventType':
-        """Factory method to create event type from dict or string"""
+    @abstractmethod
+    def from_data(cls, data: Any) -> 'JobEventType':
+        """
+        Deserialize event-specific data into an instance of the event.
+        """
+        pass
+
+    @classmethod
+    def from_value(cls, data: Union[str, Dict[str, Any]]) -> 'JobEventType':
+        # Case 1: Input is a simple string.
         if isinstance(data, str):
-            # Case 1: Simple string event types
-            return cls._deserialize_string_event(data)
+            event_class = _EVENT_TYPE_MAP.get(data)
+            if event_class is None:
+                logger.warning("Unrecognized event type string: %s", data)
+                return UnknownEvent(raw=data)
+            return event_class.from_data(data)
+        # Case 2: Input is a dict.
         elif isinstance(data, dict):
-            # Case 2: Complex object event types
-            return cls._deserialize_object_event(data)
+            for key, value in data.items():
+                event_class = _EVENT_TYPE_MAP.get(key)
+                if event_class:
+                    return event_class.from_data(value)
+            raise ValueError(f"Unknown event type in object: {data}")
         else:
-            logger.error(f"Expected string or object for event_type, got: {type(data)}")
-            raise ValueError(f"Expected string or object for event_type, got: {type(data)}")
+            logger.error("Expected string or dict for event type, got: %s", type(data))
+            raise ValueError(f"Expected string or dict for event type, got: {type(data)}")
+
+
+@dataclass(frozen=True)
+class UnknownEvent(JobEventType):
+    raw: Any
+
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "Unknown")
 
     @classmethod
-    def _deserialize_string_event(cls, event_str: str) -> 'JobEventType':
-        """Deserialize string event types"""
-        if event_str == "CanceledOrders" or event_str == "CancelledOrders":
-            return CanceledOrders()
-        elif event_str == "Paused":
-            return Paused()
-        elif event_str == "Resumed":
-            return Resumed()
-        elif event_str == "Stopped":
-            return Stopped()
-        elif event_str == "Finished":
-            return Finished()
-        elif event_str == "StepDone":
-            # For the new flat format, we'll set step_index to 0 here
-            # and the actual completed_steps value is in the parent object
-            return StepDone(0)
-        elif event_str == "OrdersPlaced":
-            # For the new flat format, we'll set orders to empty here
-            # and the actual orders are in the parent object
-            return OrdersPlaced([])
-        elif event_str == "Created":
-            # For the new flat format, we'll create an empty CreatedMeta
-            # and the actual metadata is in the parent object
-            return Created(CreatedMeta(
-                name="",
-                user_id=0,
-                coins=[],
-                side="",
-                discount_pct=0.0,
-                amount=0.0,
-                steps_total=0,
-                duration_minutes=0.0
-            ))
-        else:
-            logger.warning(f"Unrecognized string variant for event_type: {event_str}")
-            # Instead of raising an error, create a generic event type
-            return JobEventType()
-
-    @classmethod
-    def _deserialize_object_event(cls, event_obj: Dict[str, Any]) -> 'JobEventType':
-        """Deserialize complex object event types"""
-        if "Created" in event_obj:
-            created_data = event_obj["Created"]
-            return Created(CreatedMeta(
-                name=created_data.get("name", ""),
-                user_id=int(created_data.get("user_id", 0)),
-                coins=created_data.get("coins", []),
-                side=created_data.get("side", ""),
-                discount_pct=float(created_data.get("discount_pct", 0.0)),
-                amount=float(created_data.get("amount", 0.0)),
-                steps_total=int(created_data.get("steps_total", 0)),
-                duration_minutes=float(created_data.get("duration_minutes", 0.0))
-            ))
-        elif "StepDone" in event_obj:
-            step_index = event_obj["StepDone"]
-            return StepDone(step_index)
-        elif "Error" in event_obj:
-            error_msg = event_obj["Error"]
-            return ErrorEvent(error_msg)
-        elif "OrdersPlaced" in event_obj:
-            orders_data = event_obj["OrdersPlaced"]
-            if not isinstance(orders_data, list):
-                logger.error(f"'OrdersPlaced' should be an array, but was: {orders_data}")
-                raise ValueError("'OrdersPlaced' must be an array")
-
-            orders = [OpenOrderLog.from_dict(order) for order in orders_data]
-            return OrdersPlaced(orders)
-        elif "CancelledOrders" in event_obj:
-            cancelled_data = event_obj["CancelledOrders"]
-            if not isinstance(cancelled_data, list):
-                logger.error(f"'CancelledOrders' should be an array, but was: {cancelled_data}")
-                raise ValueError("'CancelledOrders' must be an array")
-
-            cancelled = [OpenOrderLog.from_dict(order) for order in cancelled_data]
-            return CancelledOrders(cancelled)
-        else:
-            logger.error(f"Unknown object variant in event_type: {event_obj}")
-            raise ValueError(f"Unknown object variant in event_type: {event_obj}")
+    def from_data(cls, data: Any) -> 'UnknownEvent':
+        return cls(raw=data)
 
 
-@dataclass
+# ------------------------------------------------------------------------------
+# Concrete Event Types
+# ------------------------------------------------------------------------------
+
+# Simple events that do not require extra data.
+
+@dataclass(frozen=True)
 class Paused(JobEventType):
-    """Job paused event"""
-    type_name: str = field(default="Paused", init=False)
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "Paused")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'Paused':
+        return cls()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Resumed(JobEventType):
-    """Job resumed event"""
-    type_name: str = field(default="Resumed", init=False)
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "Resumed")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'Resumed':
+        return cls()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Stopped(JobEventType):
-    """Job stopped event"""
-    type_name: str = field(default="Stopped", init=False)
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "Stopped")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'Stopped':
+        return cls()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Finished(JobEventType):
-    """Job finished event"""
-    type_name: str = field(default="Finished", init=False)
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "Finished")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'Finished':
+        return cls()
 
 
-@dataclass
+@dataclass(frozen=True)
 class CanceledOrders(JobEventType):
-    """Orders canceled event (empty version)"""
-    type_name: str = field(default="CanceledOrders", init=False)
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "CanceledOrders")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'CanceledOrders':
+        return cls()
 
 
-@dataclass
+# Complex event: Created
+
+@dataclass(frozen=True)
 class CreatedMeta:
-    """Metadata for Created event"""
     name: str
     user_id: int
     coins: List[str]
@@ -156,30 +126,74 @@ class CreatedMeta:
     duration_minutes: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class Created(JobEventType):
-    """Job created event"""
     data: CreatedMeta
-    type_name: str = field(default="Created", init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "Created")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'Created':
+        if not isinstance(data, dict):
+            data = {}
+        meta = CreatedMeta(
+            name=data.get("name", ""),
+            user_id=int(data.get("user_id", 0)),
+            coins=data.get("coins", []),
+            side=data.get("side", ""),
+            discount_pct=float(data.get("discount_pct", 0.0)),
+            amount=float(data.get("amount", 0.0)),
+            steps_total=int(data.get("steps_total", 0)),
+            duration_minutes=float(data.get("duration_minutes", 0.0))
+        )
+        return cls(data=meta)
 
 
-@dataclass
+# Complex event: StepDone
+
+@dataclass(frozen=True)
 class StepDone(JobEventType):
-    """Step completed event"""
     step_index: int
-    type_name: str = field(default="StepDone", init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "StepDone")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'StepDone':
+        if isinstance(data, int):
+            return cls(step_index=data)
+        elif isinstance(data, dict):
+            return cls(step_index=int(data.get("step_index", 0)))
+        else:
+            logger.error("Invalid data for StepDone: %s", data)
+            raise ValueError("Invalid data for StepDone")
 
 
-@dataclass
+# Complex event: ErrorEvent
+
+@dataclass(frozen=True)
 class ErrorEvent(JobEventType):
-    """Error event"""
     error_message: str
-    type_name: str = field(default="Error", init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "Error")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'ErrorEvent':
+        if isinstance(data, str):
+            return cls(error_message=data)
+        elif isinstance(data, dict):
+            return cls(error_message=str(data.get("message", "")))
+        else:
+            logger.error("Invalid data for ErrorEvent: %s", data)
+            raise ValueError("Invalid data for ErrorEvent")
 
 
-@dataclass
+# Complex event: OrdersPlaced
+
+@dataclass(frozen=True)
 class OpenOrderLog:
-    """Log of an open order"""
     order_id: str
     symbol: str
     side: str
@@ -190,7 +204,6 @@ class OpenOrderLog:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'OpenOrderLog':
-        """Create an OpenOrderLog from a dictionary"""
         return cls(
             order_id=data.get('order_id', ''),
             symbol=data.get('symbol', ''),
@@ -202,130 +215,91 @@ class OpenOrderLog:
         )
 
 
-@dataclass
+@dataclass(frozen=True)
 class OrdersPlaced(JobEventType):
-    """Orders placed event"""
     orders: List[OpenOrderLog]
-    type_name: str = field(default="OrdersPlaced", init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "type_name", "OrdersPlaced")
+
+    @classmethod
+    def from_data(cls, data: Any) -> 'OrdersPlaced':
+        if not isinstance(data, list):
+            logger.error("'OrdersPlaced' should be a list, but got: %s", data)
+            raise ValueError("'OrdersPlaced' must be a list")
+        orders = [OpenOrderLog.from_dict(order) for order in data]
+        return cls(orders=orders)
 
 
-@dataclass
-class CancelledOrders(JobEventType):
-    """Orders cancelled event"""
-    orders: List[OpenOrderLog]
-    type_name: str = field(default="CancelledOrders", init=False)
+# ------------------------------------------------------------------------------
+# Registry for Event Type Dispatching
+# ------------------------------------------------------------------------------
 
+_EVENT_TYPE_MAP: Dict[str, Type[JobEventType]] = {
+    "Paused": Paused,
+    "Resumed": Resumed,
+    "Stopped": Stopped,
+    "Finished": Finished,
+    "CanceledOrders": CanceledOrders,
+    "Created": Created,
+    "StepDone": StepDone,
+    "Error": ErrorEvent,
+    "OrdersPlaced": OrdersPlaced,
+}
+
+
+# ------------------------------------------------------------------------------
+# Full JobEvent Model
+# ------------------------------------------------------------------------------
 
 @dataclass
 class JobEvent:
-    """Full job event from Kafka"""
-    job_id: str
+    job_id: int
     timestamp: str
-    event_type: JobEventType
-
-    # Optional fields that might be in the flat structure
-    user_id: Optional[int] = None
-    completed_steps: Optional[int] = None
-    orders: Optional[List[Dict[str, Any]]] = None
+    type: JobEventType
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'JobEvent':
-        """Create a JobEvent from a dictionary"""
-        # Handle missing values
         if 'job_id' not in data:
             logger.error("Missing job_id in job event data")
             raise ValueError("Missing job_id in job event data")
-
         if 'event_type' not in data:
             logger.error("Missing event_type in job event data")
             raise ValueError("Missing event_type in job event data")
 
-        # Extract optional fields from the flat structure
-        user_id = data.get('user_id')
-        if user_id and isinstance(user_id, str):
-            try:
-                user_id = int(user_id)
-            except ValueError:
-                logger.warning(f"Could not convert user_id to int: {user_id}")
-
-        completed_steps = data.get('completed_steps')
-        orders = data.get('orders')
-
-        # Create the JobEvent instance
+        event = JobEventType.from_value(data['event_type'])
         return cls(
-            job_id=data.get('job_id', ''),
+            job_id=data['job_id'],
             timestamp=data.get('timestamp', datetime.now().isoformat()),
-            event_type=JobEventType.from_dict(data.get('event_type', {})),
-            user_id=user_id,
-            completed_steps=completed_steps,
-            orders=orders
+            type=event
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert JobEvent to a dictionary for storage"""
-        # Start with basic fields
         result = {
             'job_id': self.job_id,
             'timestamp': self.timestamp,
-            'event_type': self.event_type.type_name
+            'event_type': self.type.type_name
         }
-
-        # Add user_id if available
-        if self.user_id is not None:
-            result['user_id'] = self.user_id
-
-        # Add completed_steps if available
-        if self.completed_steps is not None:
-            result['completed_steps'] = self.completed_steps
-
-        # Add orders if available
-        if self.orders is not None:
-            result['orders'] = self.orders
-
-        # Add type-specific fields from complex event types
-        if isinstance(self.event_type, Created) and hasattr(self.event_type, 'data'):
-            # Only add these fields if they aren't already in the flat structure
-            if self.user_id is None and self.event_type.data.user_id:
-                result['user_id'] = self.event_type.data.user_id
-
-            if self.event_type.data.name:
-                result['name'] = self.event_type.data.name
-
-            if self.event_type.data.coins:
-                result['coins'] = self.event_type.data.coins
-
-            if self.event_type.data.side:
-                result['side'] = self.event_type.data.side
-
-            if self.event_type.data.discount_pct:
-                result['discount_pct'] = self.event_type.data.discount_pct
-
-            if self.event_type.data.amount:
-                result['amount'] = self.event_type.data.amount
-
-            if self.event_type.data.steps_total:
-                result['steps_total'] = self.event_type.data.steps_total
-
-            if self.event_type.data.duration_minutes:
-                result['duration_minutes'] = self.event_type.data.duration_minutes
-
-            result['status'] = 'Created'
-
-        elif isinstance(self.event_type, StepDone):
-            # Only add step_index if completed_steps isn't already in the flat structure
-            if self.completed_steps is None and self.event_type.step_index:
-                result['completed_steps'] = self.event_type.step_index
-
-        elif isinstance(self.event_type, OrdersPlaced):
-            # Only add orders if they aren't already in the flat structure
-            if self.orders is None and self.event_type.orders:
-                result['orders'] = [vars(order) for order in self.event_type.orders]
-
-        elif isinstance(self.event_type, CancelledOrders):
-            # Add cancelled_orders (these don't have a flat field counterpart)
-            result['cancelled_orders'] = [vars(order) for order in self.event_type.orders]
-
-        elif isinstance(self.event_type, (Paused, Resumed, Stopped, Finished)):
-            result['status'] = self.event_type.type_name
+        # Optionally include extra fields for specific event types:
+        if isinstance(self.type, Created):
+            meta = self.type.data
+            result.update({
+                'name': meta.name,
+                'coins': meta.coins,
+                'side': meta.side,
+                'discount_pct': meta.discount_pct,
+                'amount': meta.amount,
+                'steps_total': meta.steps_total,
+                'duration_minutes': meta.duration_minutes,
+                'status': 'Created'
+            })
+        elif isinstance(self.type, StepDone):
+            result['completed_steps'] = self.type.step_index
+        elif isinstance(self.type, OrdersPlaced):
+            result['orders'] = [vars(order) for order in self.type.orders]
+        elif isinstance(self.type, (Paused, Resumed, Stopped, Finished)):
+            result['status'] = self.type.type_name
+        elif isinstance(self.type, ErrorEvent):
+            result['error_message'] = self.type.error_message
 
         return result

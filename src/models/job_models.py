@@ -2,33 +2,19 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, ClassVar
 from pydantic import BaseModel, Field, field_validator
 
+from src.models.job_events import (
+    JobEvent, StepDone, OrdersPlaced, Finished, 
+    Paused, Resumed, ErrorEvent, Created
+)
 from src.utils import log_util
 
 logger = log_util.get_logger()
-
-
-class JobEvent(BaseModel):
-    """Base model for all job events received from Kafka."""
-    job_id: int
-    user_id: Optional[int] = None
-    event_type: str
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "JobEvent":
-        """Create a JobEvent from a dictionary."""
-        return cls(**data)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the model to a dictionary."""
-        return self.model_dump()
 
 
 class Job(BaseModel):
     """Model representing a trading job with its full state."""
     job_id: int
     user_id: int
-    event_type: str
     name: Optional[str] = ""
     coins: List[str] = []
     side: Optional[str] = ""
@@ -36,11 +22,12 @@ class Job(BaseModel):
     amount: float = 0.0
     steps_total: int = 0
     duration_minutes: float = 0.0
-    timestamp: str
+    timestamp: str  # created_at timestamp
+    last_updated: str  # updated_at timestamp
     status: Optional[str] = ""
     completed_steps: Optional[int] = 0
     orders: Optional[List[Dict[str, Any]]] = []
-    
+
     # Constants for job types
     DCA_JOB_NAMES: ClassVar[List[str]] = ["dca", "Dca", "DCA"]
     LIQ_JOB_NAMES: ClassVar[List[str]] = ["liq", "Liq", "LIQ"]
@@ -58,8 +45,8 @@ class Job(BaseModel):
 
     @property
     def updated_at(self) -> str:
-        """Alias for timestamp"""
-        return self.timestamp
+        """Return the last update timestamp"""
+        return self.last_updated
 
     @property
     def job_status(self) -> str:
@@ -85,57 +72,79 @@ class Job(BaseModel):
             "discount_pct": self.discount_pct,
             "duration_minutes": self.duration_minutes
         }
-    
+
     @property
     def is_dca_job(self) -> bool:
         """Check if this is a DCA job based on name."""
         return self.name.lower() in [n.lower() for n in self.DCA_JOB_NAMES]
-    
+
     @property
     def is_liq_job(self) -> bool:
         """Check if this is a liquidity job based on name."""
         return self.name.lower() in [n.lower() for n in self.LIQ_JOB_NAMES]
-    
+
     @property
     def is_active(self) -> bool:
         """Check if job is currently active (not finished or stopped)."""
         return self.status not in self.TERMINAL_STATUSES
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Job":
         """Create a Job from a dictionary."""
+        if 'last_updated' not in data:
+            data['last_updated'] = data.get('timestamp', '')
         return cls(**data)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert the model to a dictionary."""
         return self.model_dump()
 
+    @classmethod
+    def create_from_event(cls, event: JobEvent) -> 'Job':
+        """Create a new job from a Created event."""
+        if not isinstance(event.type, Created):
+            raise ValueError("Can only create jobs from Created events")
+            
+        return cls(
+            job_id=event.job_id,
+            user_id=event.type.data.user_id,
+            name=event.type.data.name,
+            coins=event.type.data.coins,
+            side=event.type.data.side,
+            discount_pct=event.type.data.discount_pct,
+            amount=event.type.data.amount,
+            steps_total=event.type.data.steps_total,
+            duration_minutes=event.type.data.duration_minutes,
+            timestamp=event.timestamp,
+            last_updated=event.timestamp,
+            status="Created"
+        )
 
-class CreateJobEvent(JobEvent):
-    """Specific model for job creation events."""
-    name: Optional[str] = ""
-    coins: List[str] = []
-    side: Optional[str] = ""
-    discount_pct: float = 0.0
-    amount: float = 0.0
-    steps_total: int = 0
-    duration_minutes: float = 0.0
-    
-    def to_job(self) -> Job:
-        """Convert creation event to a Job object."""
-        return Job(
-            job_id=self.job_id,
-            user_id=self.user_id,
-            event_type=self.event_type,
-            name=self.name,
-            coins=self.coins,
-            side=self.side,
-            discount_pct=self.discount_pct,
-            amount=self.amount,
-            steps_total=self.steps_total,
-            duration_minutes=self.duration_minutes,
-            timestamp=self.timestamp,
-            status="Created",
-            completed_steps=0,
-            orders=[]
-        ) 
+    def apply_event(self, event: JobEvent) -> None:
+        """Update job state based on an event."""
+        # Update the last_updated timestamp
+        self.last_updated = event.timestamp
+        
+        if isinstance(event.type, StepDone):
+            self.completed_steps = event.type.step_index
+            self.status = "In Progress"
+            
+        elif isinstance(event.type, OrdersPlaced):
+            # Append new orders to existing collection
+            new_orders = [vars(order) for order in event.type.orders]
+            self.orders.extend(new_orders)
+            
+        elif isinstance(event.type, Finished):
+            self.status = event.type.type_name
+            
+        elif isinstance(event.type, Paused):
+            self.status = event.type.type_name
+            
+        elif isinstance(event.type, Resumed):
+            self.status = event.type.type_name
+            
+        elif isinstance(event.type, ErrorEvent):
+            self.status = "Error"
+            
+        else:
+            logger.warning(f"Unhandled event type: {event.type.__class__.__name__}")

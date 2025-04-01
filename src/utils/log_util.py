@@ -1,7 +1,7 @@
 import logging.config
 import os
-from .paths import get_log_file_path
-from ..config.config import Config
+from src.utils.paths import get_log_file_path
+from src.config.config import Config
 
 BASE_LOGGER_PREFIX = 'tradeguard.health'
 log_file = get_log_file_path()

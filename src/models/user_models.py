@@ -84,27 +84,3 @@ class UserLimits(BaseModel):
         return self.model_dump()
 
 
-class UserState(BaseModel):
-    """Model representing a user's current trading state."""
-    user_id: int
-    daily_trade_count: int = 0
-    daily_volume: float = 0.0
-    last_trade_timestamp: Optional[str] = None
-    active_jobs_count: int = 0
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UserState":
-        """Create a UserState instance from a dictionary."""
-        return cls(**data)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the model to a dictionary."""
-        return self.model_dump()
-
-    def is_within_limits(self, limits: UserLimits) -> bool:
-        """Check if the user state is within the specified limits."""
-        return (
-                self.daily_trade_count <= limits.max_daily_trades and
-                self.daily_volume <= limits.max_daily_volume and
-                self.active_jobs_count <= limits.max_concurrent_jobs
-        )

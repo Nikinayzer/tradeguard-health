@@ -3,25 +3,22 @@ Models package
 Provides domain models for all entities in the system.
 """
 
-from src.models.job_models import Job, JobEvent as PydanticJobEvent, CreateJobEvent
-from src.models.user_models import UserLimits, UserState
-from src.models.risk_models import Risk, RiskReport, Trigger, RiskType, RiskLevel
-from src.models.event_mapper import EventMapper
-
-from src.models.models import Job, UserLimits, RiskReport, Risk, Trigger
-
-# For backward compatibility with existing code using dataclass-based events
+# Import event models first to avoid circular imports
 from src.models.job_events import (
     JobEvent, JobEventType, 
     Created, Paused, Resumed, Stopped, Finished,
-    StepDone, OrdersPlaced, CancelledOrders, CanceledOrders,
+    StepDone, OrdersPlaced, CanceledOrders,
     ErrorEvent, OpenOrderLog, CreatedMeta
 )
 
+# Then import job models which depend on events
+from src.models.job_models import Job
+from src.models.user_models import UserLimits
+from src.models.risk_models import Risk, RiskReport, Trigger, RiskType, RiskLevel
+
 __all__ = [
     'Job', 'UserLimits', 'RiskReport', 'Risk', 'Trigger',
-
     'JobEvent', 'JobEventType',
-    'Created', 'CreatedMeta', 'StepDone', 'OrdersPlaced', 'CancelledOrders',
+    'Created', 'CreatedMeta', 'StepDone', 'OrdersPlaced',
     'Paused', 'Resumed', 'Stopped', 'Finished', 'ErrorEvent', 'OpenOrderLog'
 ]

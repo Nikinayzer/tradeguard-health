@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, Dict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,7 +15,7 @@ class Config:
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:19092')
     KAFKA_CONSUMER_GROUP: str = os.getenv('KAFKA_CONSUMER_GROUP', 'tradeguard-health')
     KAFKA_JOBS_TOPIC: str = os.getenv('KAFKA_JOBS_TOPIC', 'jobs')
-    KAFKA_RISK_TOPIC: str = os.getenv('KAFKA_RISK_TOPIC', 'risk_patterns')
+    KAFKA_RISK_NOTIFICATIONS_TOPIC: str = os.getenv('KAFKA_RISK_NOTIFICATIONS_TOPIC', 'risk_notifications')
 
     # API
     API_BASE_URL: str = os.getenv('API_BASE_URL', 'http://localhost:8080')
@@ -51,6 +51,7 @@ class Config:
             return "KAFKA_CONSUMER_GROUP is not set"
         if not cls.KAFKA_JOBS_TOPIC:
             return "KAFKA_JOBS_TOPIC is not set"
-        if not cls.KAFKA_RISK_TOPIC:
-            return "KAFKA_RISK_TOPIC is not set"
+        if not cls.KAFKA_RISK_NOTIFICATIONS_TOPIC:
+            return "KAFKA_RISK_NOTIFICATIONS_TOPIC is not set"
+
         return None

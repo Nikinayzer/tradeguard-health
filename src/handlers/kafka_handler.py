@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Callable, Dict, Any, Optional, List, Iterator
+from typing import Callable, Dict, Any, Optional, List, Iterator, Type, TypeVar, Generic
 from datetime import datetime
 
 from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, TopicPartition
@@ -12,11 +12,37 @@ from src.utils import log_util
 
 logger = log_util.get_logger()
 
+T = TypeVar('T')
 
-class KafkaHandler:
-    def __init__(self, message_handler: Callable[[Dict[str, Any]], None]):
-        """Initialize Kafka handler with a message processing callback."""
-        self.message_handler = message_handler
+
+class TopicConfig:
+    """Configuration for a Kafka topic."""
+
+    def __init__(self, topic: str, event_type: Type[T], deserializer: Callable[[Dict[str, Any]], T]):
+        self.topic = topic
+        self.event_type = event_type
+        self.deserializer = deserializer
+
+
+class KafkaHandler(Generic[T]):
+    """
+    Generic Kafka handler for a single topic and event type.
+    
+    Type Parameters:
+        T: The type of event this handler processes
+    """
+    def __init__(self, topic: str, event_type: Type[T], deserializer: Callable[[Dict[str, Any]], T]):
+        """
+        Initialize Kafka handler for a specific topic and event type.
+        
+        Args:
+            topic: The Kafka topic to handle
+            event_type: The type of event this handler processes
+            deserializer: Function to deserialize messages into events
+        """
+        self.topic = topic
+        self.event_type = event_type
+        self.deserializer = deserializer
         self.consumer: Optional[Consumer] = None
         self.producer: Optional[Producer] = None
         self._setup_connections()
@@ -24,22 +50,27 @@ class KafkaHandler:
     def _setup_connections(self) -> None:
         """Setup Kafka consumer and producer connections."""
         logger.info(
-            f"Connecting to Kafka at {Config.KAFKA_BOOTSTRAP_SERVERS}, subscribing to topic {Config.KAFKA_JOBS_TOPIC}"
+            f"Connecting to Kafka at {Config.KAFKA_BOOTSTRAP_SERVERS}, subscribing to topic {self.topic}"
         )
+        
         self.consumer = Consumer({
             'bootstrap.servers': Config.KAFKA_BOOTSTRAP_SERVERS,
             'group.id': Config.KAFKA_CONSUMER_GROUP,
             'auto.offset.reset': 'earliest',
             'enable.auto.commit': True,
-            'client.id': 'tradeguard_health_consumer',
+            'client.id': f'tradeguard_health_{self.topic}_consumer',
             'stats_cb': connection_status_callback,
-            'statistics.interval.ms': 1000
+            'session.timeout.ms': 10000,  # Reduce from default 45000ms
+            'max.poll.interval.ms': 60000,  # Reduce from default 300000ms
+            'fetch.min.bytes': 1,
+            'fetch.max.bytes': 52428800,  # 50MB
+            'statistics.interval.ms': 30000  # Less frequent stats collection (30s vs 1s)
         })
-        self.consumer.subscribe([Config.KAFKA_JOBS_TOPIC])
+        self.consumer.subscribe([self.topic])
 
         self.producer = Producer({
             'bootstrap.servers': Config.KAFKA_BOOTSTRAP_SERVERS,
-            'client.id': 'tradeguard_health_producer',
+            'client.id': f'tradeguard_health_{self.topic}_producer',
             'stats_cb': connection_status_callback,
             'statistics.interval.ms': 1000
         })
@@ -54,15 +85,11 @@ class KafkaHandler:
             if error_code == KafkaError._PARTITION_EOF:
                 logger.debug(f"Reached end of partition {msg.partition()}")
             elif error_code == KafkaError._OFFSET_OUT_OF_RANGE:
-                logger.debug(f"Offset out of range for partition {msg.partition()}")
+                # For offset out of range, just seek to the beginning of the partition
                 try:
                     tp = TopicPartition(msg.topic(), msg.partition())
-                    low, high = self.consumer.get_watermark_offsets(tp)
-                    if high > 0:
-                        self.consumer.seek(tp, low)
-                        logger.debug(f"Reset partition {msg.partition()} to offset {low}")
-                    else:
-                        logger.debug(f"Partition {msg.partition()} is empty")
+                    self.consumer.seek(tp, 0)  # Seek to beginning
+                    logger.debug(f"Reset partition {msg.partition()} to beginning")
                 except Exception as e:
                     logger.warning(f"Could not reset offset for partition {msg.partition()}: {e}")
             else:
@@ -70,65 +97,86 @@ class KafkaHandler:
             return True
         return False
 
-    def read_topic_from_beginning(self, topic: str, max_messages: int = 1000000) -> Iterator[Dict[str, Any]]:
-        """
-        Read all messages from the beginning of a topic.
-
-        Creates a temporary consumer for historical reads so as not to interfere with the main consumer.
-        """
-        logger.info(f"Creating temporary consumer to read topic {topic} from beginning")
+    def read_topic_from_beginning(self, max_messages: int = 1000000) -> Iterator[T]:
+        """Read all messages from the beginning of the topic."""
+        logger.info(f"Reading topic {self.topic} from beginning")
+        
+        # Create a separate consumer for historical reads
         historical_consumer = Consumer({
             'bootstrap.servers': Config.KAFKA_BOOTSTRAP_SERVERS,
             'group.id': f'tradeguard_health_historical_{id(self)}',
             'auto.offset.reset': 'earliest',
             'enable.auto.commit': False,
-            'client.id': 'tradeguard_health_historical_consumer'
+            'client.id': f'tradeguard_health_historical_{self.topic}_consumer'
         })
 
         count = 0
         try:
-            metadata = historical_consumer.list_topics(topic=topic, timeout=10.0)
-            if topic not in metadata.topics:
-                logger.warning(f"Topic {topic} not found")
+            # Get partitions once
+            metadata = historical_consumer.list_topics(topic=self.topic, timeout=10.0)
+            if self.topic not in metadata.topics:
+                logger.warning(f"Topic {self.topic} not found")
                 return
 
-            topic_obj = metadata.topics[topic]
+            topic_obj = metadata.topics[self.topic]
             partitions = topic_obj.partitions
             if not partitions:
-                logger.warning(f"Topic {topic} has no partitions")
+                logger.warning(f"Topic {self.topic} has no partitions")
                 return
 
-            logger.info(f"Found {len(partitions)} partitions for topic {topic}")
-            topic_partitions = [TopicPartition(topic, p_id) for p_id in partitions]
+            logger.info(f"Found {len(partitions)} partitions for topic {self.topic}")
+            
+            # Create TopicPartition objects and get watermarks
+            topic_partitions = []
+            for p_id in partitions:
+                tp = TopicPartition(self.topic, p_id)
+                low, high = historical_consumer.get_watermark_offsets(tp)
+                if high > 0:  # Only include partitions with messages
+                    tp.offset = low  # Set to earliest offset
+                    topic_partitions.append(tp)
+                    logger.info(f"Partition {p_id} has {high - low} messages (offset range: {low}-{high})")
+            
+            if not topic_partitions:
+                logger.warning("No partitions have messages")
+                return
+                
+            # Assign partitions with their starting offsets
             historical_consumer.assign(topic_partitions)
-            _seek_to_beginning(historical_consumer, topic_partitions)
+            logger.info(f"Assigned {len(topic_partitions)} partitions with messages")
 
             consecutive_empty_polls = 0
-            max_empty_polls = 5
+            max_empty_polls = 5  # Increased to ensure we read from all partitions
+            remaining_partitions = set(tp.partition for tp in topic_partitions)
 
-            while count < max_messages and consecutive_empty_polls < max_empty_polls:
+            while count < max_messages and consecutive_empty_polls < max_empty_polls and remaining_partitions:
                 try:
-                    msg = historical_consumer.poll(1.0)
+                    msg = historical_consumer.poll(0.1)
                     if msg is None:
                         consecutive_empty_polls += 1
-                        if consecutive_empty_polls >= max_empty_polls:
-                            logger.debug(f"No more messages after {consecutive_empty_polls} empty polls")
-                            break
-                        if _reached_end_of_all_partitions(historical_consumer, topic_partitions):
-                            logger.debug(f"Reached end of all partitions in topic {topic}")
-                            break
                         continue
 
-                    # Reset counter when a message is received.
                     consecutive_empty_polls = 0
 
-                    if self._handle_consumer_error(msg):
+                    if msg.error():
+                        if msg.error().code() == KafkaError._PARTITION_EOF:
+                            remaining_partitions.discard(msg.partition())
+                            logger.debug(f"Reached end of partition {msg.partition()}, {len(remaining_partitions)} partitions remaining")
+                            if not remaining_partitions:
+                                logger.info("Reached end of all partitions")
+                                break
+                        else:
+                            logger.error(f"Consumer error: {msg.error()}")
                         continue
 
                     message_data = _decode_and_parse_message(msg)
                     if message_data is not None:
-                        count += 1
-                        yield message_data
+                        try:
+                            event = self.deserializer(message_data)
+                            count += 1
+                            yield event
+                        except Exception as e:
+                            logger.error(f"Error deserializing message: {e}")
+                            continue
 
                 except Exception as e:
                     logger.error(f"Unexpected error reading from Kafka: {e}")
@@ -141,19 +189,19 @@ class KafkaHandler:
                 historical_consumer.close()
                 logger.info(f"Closed historical consumer after reading {count} messages")
             except Exception as e:
-                logger.error(f"Error closing consumer: {e}")
+                logger.error(f"Error closing historical consumer: {e}")
             if count == 0:
                 yield from []
 
-    def send_message(self, topic: str, message: dict) -> None:
-        """Send a message to a Kafka topic."""
+    def send_message(self, message: dict) -> None:
+        """Send a message to the Kafka topic."""
         if not self.producer:
             logger.error("Producer not initialized")
             return
 
         try:
             self.producer.produce(
-                topic,
+                self.topic,
                 json.dumps(message).encode('utf-8'),
                 callback=delivery_report
             )
@@ -161,71 +209,63 @@ class KafkaHandler:
         except Exception as e:
             logger.error(f"Error sending message to Kafka: {e}")
 
-    def process_messages(self) -> None:
+    def process_messages(self, message_handler: Callable[[T], None]) -> None:
         """Process incoming Kafka messages."""
         if not self.consumer:
             logger.error("Consumer not initialized")
             return
 
-        logger.info(f"Starting to consume messages from topic {Config.KAFKA_JOBS_TOPIC}")
+        logger.info(f"Starting to consume messages from topic {self.topic}")
         message_count = 0
         error_count = 0
         last_log_time = datetime.now()
+        empty_polls = 0
+        max_empty_polls = 100
 
         try:
             while True:
-                msg = self.consumer.poll(1.0)
+                msg = self.consumer.poll(0.1)
                 current_time = datetime.now()
+
+                # Log stats every minute
                 if (current_time - last_log_time).total_seconds() > 60:
                     logger.info(f"Kafka consumer stats: {message_count} messages processed, {error_count} errors")
                     last_log_time = current_time
+                    message_count = 0  # Reset counters
+                    error_count = 0
 
                 if msg is None:
+                    empty_polls += 1
+                    if empty_polls >= max_empty_polls:
+                        logger.debug("No messages received for a while")
+                        empty_polls = 0
                     continue
+
+                empty_polls = 0
 
                 if self._handle_consumer_error(msg):
                     error_count += 1
                     continue
 
                 try:
-                    raw_data = json.loads(msg.value().decode('utf-8'))
-                    job_id = raw_data.get('job_id', 'unknown')
-                    event_type = raw_data.get('event_type', 'unknown')
-                    user_id = raw_data.get('user_id', 'unknown')
-                    logger.debug(
-                        f"Received message from partition {msg.partition()}, offset {msg.offset()}: "
-                        f"job_id={job_id}, event={event_type}"
-                    )
+                    message_data = _decode_and_parse_message(msg)
+                    if message_data is not None:
+                        logger.info(f"!!!NEW MESSAGE FROM {self.topic}!!!")
+                        try:
+                            event = self.deserializer(message_data)
+                            message_handler(event)
+                            message_count += 1
+                        except Exception as e:
+                            logger.error(f"Error processing message: {e}")
+                            error_count += 1
 
-                    try:
-                        job_event = JobEvent.from_dict(raw_data)
-                        message_data = job_event.to_dict()
-                    except (ValueError, KeyError) as e:
-                        logger.warning(f"Error parsing job event (job_id={job_id}): {e}. Using raw data instead.")
-                        logger.debug(f"Raw event data: {raw_data}")
-                        message_data = raw_data
-
-                    logger.debug(f"Processing job event: job_id={job_id}, event={event_type}, user_id={user_id}")
-                    self.message_handler(message_data)
-                    message_count += 1
-
-                except json.JSONDecodeError as e:
+                except Exception as e:
+                    logger.error(f"Error handling message: {e}")
                     error_count += 1
-                    logger.error(f"Error decoding message: {e}")
-                    try:
-                        raw_message = msg.value().decode('utf-8')
-                    except UnicodeDecodeError as e:
-                        logger.error(f"Failed to decode message due to {e}. Raw message: {msg.value()[:200]}...")
-                    else:
-                        logger.debug(f"Decoded message: {raw_message[:200]}...")
 
-        except KeyboardInterrupt:
-            logger.info("Shutting down Kafka connections...")
         except Exception as e:
-            logger.exception(f"Unexpected error in Kafka consumer: {e}")
-        finally:
-            logger.info(f"Closing Kafka consumer. Processed {message_count} messages with {error_count} errors")
-            self.close()
+            logger.error(f"Fatal error in message processing: {e}")
+            raise
 
     def close(self) -> None:
         """Close Kafka connections."""
@@ -236,83 +276,42 @@ class KafkaHandler:
         logger.info("Kafka connections closed")
 
 
-def _reached_end_of_all_partitions(consumer: Consumer, topic_partitions: List[TopicPartition]) -> bool:
-    """
-    Check if the consumer's current positions have reached the high watermark for all partitions.
-
-    Returns:
-        True if all partitions are at their high watermark (or empty), False otherwise.
-        In case of an error, logs the error and returns True to avoid blocking processing.
-    """
+def _reached_end_of_all_partitions(consumer: Consumer, partitions: List[TopicPartition]) -> bool:
+    """Check if we've reached the end of all partitions."""
     try:
-        positions = consumer.position(topic_partitions)
-        if not positions:
-            logger.debug("No positions returned, assuming end of partitions")
-            return True
-
-        # Create a mapping: partition number -> position
-        pos_map = {p.partition: p for p in positions}
-
-        for tp in topic_partitions:
-            position = pos_map.get(tp.partition)
-            if position is None:
-                logger.debug("No position found for partition %s, skipping", tp.partition)
-                continue
-
-            low, high = consumer.get_watermark_offsets(tp)
-            logger.debug("Partition %s: position=%s, high=%s", tp.partition, repr(position), repr(high))
-
-            # If the partition isn't empty and the position is behind the high watermark, we're not at the end.
-            if high != 0 and position < high:
-                logger.debug("Partition %s not at end: position=%s, high=%s", tp.partition, position, high)
+        for partition in partitions:
+            low, high = consumer.get_watermark_offsets(partition)
+            current = consumer.position([partition])[0].offset
+            if current < high:
                 return False
-
         return True
-
     except Exception as e:
-        # logger.warning("Error checking end of partitions: %s", e) #suspend this error message, probs kafka library issue
-        return True
+        logger.error(f"Error checking partition positions: {e}")
+        return False
 
 
 def _decode_and_parse_message(msg) -> Optional[Dict[str, Any]]:
     """
-    Decode the raw message, attempt to deserialize with JobEvent model,
-    and fall back to raw dict if needed.
+    Decode the raw message into a dictionary.
+    
+    Args:
+        msg: The Kafka message to decode
+    
+    Returns:
+        The decoded message as a dictionary or None if decoding fails
     """
     try:
-        raw_data = json.loads(msg.value().decode('utf-8'))
+        return json.loads(msg.value().decode('utf-8'))
     except json.JSONDecodeError as e:
-        logger.error(f"Error decoding historical message: {e}")
+        logger.error(f"Error decoding message: {e}")
         return None
 
+
+def _seek_to_beginning(consumer: Consumer, partitions: List[TopicPartition]) -> None:
+    """Seek to the beginning of all partitions."""
     try:
-        # Attempt to deserialize with JobEvent model.
-        job_event = JobEvent.from_dict(raw_data)
-        message_data = job_event.to_dict()
-    except (ValueError, KeyError) as e:
-        logger.warning(f"Error parsing job event: {e}. Using raw data instead.")
-        message_data = raw_data
-
-    return message_data
-
-
-def _seek_to_beginning(consumer: Consumer, topic_partitions: List[TopicPartition]) -> None:
-    """Seek to the beginning of each partition."""
-    for tp in topic_partitions:
-        try:
-            low, high = consumer.get_watermark_offsets(tp)
-            if high == 0:
-                logger.debug(f"Partition {tp.partition} is empty (high={high})")
-                continue
-            logger.debug(f"Partition {tp.partition} watermarks: low={low}, high={high}")
-            try:
-                consumer.seek(tp)
-            except Exception as e1:
-                logger.warning(f"Could not seek partition {tp.partition} without offset: {e1}")
-                try:
-                    consumer.seek(TopicPartition(tp.topic, tp.partition, low))
-                except Exception as e2:
-                    logger.warning(f"Could not seek partition {tp.partition} with offset: {e2}")
-        except Exception as e:
-            logger.warning(f"Could not seek partition {tp.partition}: {e}")
-    logger.info("Seeking to beginning of all partitions")
+        for partition in partitions:
+            consumer.seek(partition)
+        logger.info("Seeking to beginning of all partitions")
+    except Exception as e:
+        logger.error(f"Error seeking to beginning of partitions: {e}")
