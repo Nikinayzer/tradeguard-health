@@ -82,13 +82,13 @@ class KafkaHandler(Generic[T]):
         """
         if msg.error():
             error_code = msg.error().code()
-            if error_code == KafkaError._PARTITION_EOF:
+            if error_code == KafkaError.PARTITION_EOF:
                 logger.debug(f"Reached end of partition {msg.partition()}")
-            elif error_code == KafkaError._OFFSET_OUT_OF_RANGE:
+            elif error_code == KafkaError.OFFSET_OUT_OF_RANGE:
                 # For offset out of range, just seek to the beginning of the partition
                 try:
                     tp = TopicPartition(msg.topic(), msg.partition())
-                    self.consumer.seek(tp, 0)  # Seek to beginning
+                    self.consumer.seek(tp)  # Seek to beginning
                     logger.debug(f"Reset partition {msg.partition()} to beginning")
                 except Exception as e:
                     logger.warning(f"Could not reset offset for partition {msg.partition()}: {e}")
@@ -158,7 +158,7 @@ class KafkaHandler(Generic[T]):
                     consecutive_empty_polls = 0
 
                     if msg.error():
-                        if msg.error().code() == KafkaError._PARTITION_EOF:
+                        if msg.error().code() == KafkaError.PARTITION_EOF:
                             remaining_partitions.discard(msg.partition())
                             logger.debug(f"Reached end of partition {msg.partition()}, {len(remaining_partitions)} partitions remaining")
                             if not remaining_partitions:
