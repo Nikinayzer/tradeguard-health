@@ -19,7 +19,7 @@ from src.risk.evaluators.base import BaseRiskEvaluator
 from src.utils.datetime_utils import DateTimeUtils
 from src.utils.log_util import get_logger
 from src.models.user_models import UserLimits
-from src.models.risk_models import RiskType
+from src.models.risk_models import RiskCategory, Pattern
 from src.config.config import Config
 
 logger = get_logger()
@@ -33,26 +33,26 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
     # map to which risk categories
     RISK_CATEGORY_MAPPINGS = {
         # Position sizing related checks
-        "single_job_limit": RiskType.POSITION_SIZE,
-        "max_portfolio_risk": RiskType.PORTFOLIO_EXPOSURE,
-        
+        "single_job_limit": RiskCategory.POSITION_SIZE,
+        "max_portfolio_risk": RiskCategory.PORTFOLIO_EXPOSURE,
+
         # Overtrading related checks
-        "daily_trades_limit": RiskType.OVERTRADING,
-        "daily_volume_limit": RiskType.OVERTRADING,
-        
+        "daily_trades_limit": RiskCategory.OVERTRADING,
+        "daily_volume_limit": RiskCategory.OVERTRADING,
+
         # Time pattern related checks
-        "trade_cooldown": RiskType.TIME_PATTERN,
-        
+        "trade_cooldown": RiskCategory.TIME_PATTERN,
+
         # Execution related checks
-        "concurrent_jobs": RiskType.EXECUTION,
-        
+        "concurrent_jobs": RiskCategory.EXECUTION,
+
         # Sunk cost related checks
-        "max_consecutive_losses": RiskType.SUNK_COST,
-        "daily_loss_limit": RiskType.SUNK_COST,
-        
+        "max_consecutive_losses": RiskCategory.SUNK_COST,
+        "daily_loss_limit": RiskCategory.SUNK_COST,
+
         # FOMO related checks
-        "liquidity_threshold": RiskType.FOMO,
-        "volatility_limit": RiskType.FOMO,
+        "liquidity_threshold": RiskCategory.FOMO,
+        "volatility_limit": RiskCategory.FOMO,
     }
 
     def __init__(self):
@@ -61,46 +61,41 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             evaluator_id="user_limits_evaluator",
             description="Checks job against user-defined trading limits"
         )
-
-        # Cache user limits to avoid excessive API calls
+        # todo doesnt belong here, just testing
         self.user_limits_cache: Dict[int, UserLimits] = {}
-        self.cache_ttl_seconds = 1  # debug
+        self.cache_ttl_seconds = 1
         self.cache_timestamps: Dict[int, datetime] = {}
 
-    def evaluate(self, user_id: int, job: Job, job_history: Dict[int, Job]) -> List[Dict[str, Any]]:
+    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[Pattern]:
         """
         Evaluate user limits violations.
         
         Args:
             user_id: User ID
-            job: Current job as a Job object
             job_history: User's job history as a dictionary mapping job_id to Job objects
             
         Returns:
-            List of evidence dictionaries
+            List of patterns dictionaries
         """
-        # Log that we're evaluating this job
-        job_id = job.job_id
-        logger.info(f"UserLimitsEvaluator: Evaluating job {job_id} for user {user_id}")
+        last_key = next(reversed(job_history))  # HOPE THIS WORKS BECAUSE ELSE I WILL KMS
+        job = job_history[last_key]
 
-        # Initialize results
-        evidence = []
+        logger.info(f"UserLimitsEvaluator: Evaluating job {job.job_id} for user {user_id}")
 
-        # Try to get user limits - if None, we'll use defaults
+        patterns = []
+
         user_limits = self._get_user_limits(user_id)
 
-        # Check for each limit type
-        evidence.extend(self._check_single_job_limit(job, user_limits))
-        evidence.extend(self._check_daily_trades_limit(job, job_history, user_limits))
-        evidence.extend(self._check_daily_volume_limit(job, job_history, user_limits))
-        evidence.extend(self._check_trade_cooldown(job, job_history, user_limits))
-        evidence.extend(self._check_concurrent_jobs(job, job_history, user_limits))
-        
-        # Add new limit checks that map to different risk categories
-        evidence.extend(self._check_consecutive_losses(job, job_history, user_limits))
-        evidence.extend(self._check_liquidity_threshold(job, user_limits))
+        patterns.extend(self._check_single_job_limit(job, user_limits))
+        # patterns.extend(self._check_daily_trades_limit(job, job_history, user_limits))
+        # patterns.extend(self._check_daily_volume_limit(job, job_history, user_limits))
+        # patterns.extend(self._check_trade_cooldown(job, job_history, user_limits))
+        # patterns.extend(self._check_concurrent_jobs(job, job_history, user_limits))
+        #
+        # patterns.extend(self._check_consecutive_losses(job, job_history, user_limits))
+        # patterns.extend(self._check_liquidity_threshold(job, user_limits))
 
-        return evidence
+        return patterns
 
     def _get_user_limits(self, user_id: int) -> Optional[UserLimits]:
         """
@@ -164,9 +159,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             logger.error(f"Error fetching user limits for user {user_id}: {str(e)}")
             return None
 
-    def _check_single_job_limit(self, job: Job, limits: UserLimits) -> List[Dict[str, Any]]:
+    def _check_single_job_limit(self, job: Job, limits: UserLimits) -> List[Pattern]:
         """Check if job amount exceeds single job limit"""
-        evidence = []
+        patterns = []
 
         amount = job.amount
         if amount > limits.max_position_size:
@@ -175,20 +170,21 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             # Use the explicit category mapping
             category = self.RISK_CATEGORY_MAPPINGS["single_job_limit"].value
 
-            evidence.append({
-                "category_id": category,
-                "confidence": confidence,
-                "evaluator_id": self.evaluator_id,
-                "data": {
-                    "job_id": job.job_id,
+            patterns.append(Pattern(
+                pattern_id="single_job_limit",
+                job_id=[job.job_id],
+                message="Single job limit exceeded",
+                confidence=confidence,
+                category_weights={RiskCategory.FOMO: 0.6,
+                                  RiskCategory.SUNK_COST: 0.3},
+                details={
                     "amount": amount,
                     "limit": limits.max_position_size,
                     "ratio": amount / limits.max_position_size,
-                    "reason": "Single job limit exceeded"
                 }
-            })
+            ))
 
-        return evidence
+        return patterns
 
     def _check_daily_trades_limit(self, job: Job, job_history: Dict[int, Job],
                                   limits: UserLimits) -> List[Dict[str, Any]]:
@@ -212,7 +208,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         # Check if exceeded limit
         if trade_count >= limits.max_daily_trades:
-            confidence = min(0.9, 0.5 + (trade_count / limits.max_daily_trades) * 0.1)
+            confidence = max(0.2, 0.5 + (trade_count / limits.max_daily_trades) * 0.1)
 
             # Use the explicit category mapping
             category = self.RISK_CATEGORY_MAPPINGS["daily_trades_limit"].value
@@ -291,13 +287,13 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         for history_job in job_history.values():
             job_timestamp = history_job.timestamp
+            dt = None
             if not job_timestamp:
-                continue
-                
-            dt = DateTimeUtils.parse_timestamp(job_timestamp)
+                #continue
+                dt = DateTimeUtils.parse_timestamp(job_timestamp)
             if not dt:
                 continue
-                
+
             if most_recent_time is None or dt > most_recent_time:
                 most_recent_time = dt
                 most_recent_trade = history_job
@@ -310,19 +306,19 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         time_diff = current_time - most_recent_time
         minutes_diff = time_diff.total_seconds() / 60
         cooldown_minutes = limits.min_trade_interval_minutes
-        
+
         if minutes_diff < cooldown_minutes:
             # Calculate how many minutes remain in the cooldown period
             cooldown_remaining_minutes = cooldown_minutes - minutes_diff
-            
+
             # Higher confidence for more severe violations
             # 0.6 for just under cooldown, up to 0.9 for immediate repeat trades
             violation_ratio = (cooldown_minutes - minutes_diff) / cooldown_minutes
             confidence = 0.6 + violation_ratio * 0.3
-            
+
             # Use the explicit category mapping
             category = self.RISK_CATEGORY_MAPPINGS["trade_cooldown"].value
-            
+
             evidence.append({
                 "category_id": category,
                 "confidence": confidence,
@@ -362,10 +358,10 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
             # Get IDs of open jobs for reference
             open_job_ids = [j.job_id for j in open_jobs]
-            
+
             # Use the explicit category mapping
             category = self.RISK_CATEGORY_MAPPINGS["concurrent_jobs"].value
-            
+
             evidence.append({
                 "category_id": category,
                 "confidence": confidence,
@@ -383,25 +379,25 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         return evidence
 
     def _check_consecutive_losses(self, job: Job, job_history: Dict[int, Job],
-                                limits: UserLimits) -> List[Dict[str, Any]]:
+                                  limits: UserLimits) -> List[Dict[str, Any]]:
         """Check if user has exceeded consecutive loss limit (SUNK_COST category)"""
         evidence = []
-        
+
         # Only check for new jobs
         if job.status != "Created":
             return evidence
-            
+
         # Count recent consecutive losses
         # This is just a skeleton implementation
         consecutive_losses = 0  # In a real implementation, calculate from job_history
         max_consecutive_losses = limits.maxConsecutiveLosses
-        
+
         if consecutive_losses >= max_consecutive_losses:
             confidence = min(0.9, 0.5 + (consecutive_losses / max_consecutive_losses) * 0.1)
-            
+
             # Use the explicit category mapping - this is SUNK_COST, different from other limits
             category = self.RISK_CATEGORY_MAPPINGS["max_consecutive_losses"].value
-            
+
             evidence.append({
                 "category_id": category,
                 "confidence": confidence,
@@ -414,30 +410,30 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                     "reason": "Consecutive losses limit exceeded"
                 }
             })
-            
+
         return evidence
-        
+
     def _check_liquidity_threshold(self, job: Job, limits: UserLimits) -> List[Dict[str, Any]]:
         """Check if job exceeds liquidity threshold (FOMO category)"""
         evidence = []
-        
+
         # Only check for new jobs 
         if job.status != "Created":
             return evidence
-            
+
         # This is a skeleton implementation - in a real system you'd get market data
         market_liquidity = 1000000  # Example value, in a real impl get from market data
         job_amount = job.amount
         liquidity_threshold = limits.liquidityThreshold
-        
+
         # If job amount is high relative to market liquidity
         if job_amount > liquidity_threshold:
             liquidity_ratio = job_amount / market_liquidity
             confidence = min(0.85, 0.4 + liquidity_ratio * 0.5)
-            
+
             # Use the explicit category mapping - this is FOMO, different from others
             category = self.RISK_CATEGORY_MAPPINGS["liquidity_threshold"].value
-            
+
             evidence.append({
                 "category_id": category,
                 "confidence": confidence,
@@ -451,5 +447,5 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                     "reason": "Job size exceeds liquidity threshold"
                 }
             })
-            
+
         return evidence

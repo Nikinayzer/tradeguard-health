@@ -14,10 +14,10 @@ from src.models.job_events import (
 # Then import job models which depend on events
 from src.models.job_models import Job
 from src.models.user_models import UserLimits
-from src.models.risk_models import Risk, RiskReport, Trigger, RiskType, RiskLevel
+from src.models.risk_models import Pattern, RiskCategory, RiskLevel
 
 __all__ = [
-    'Job', 'UserLimits', 'RiskReport', 'Risk', 'Trigger',
+    'Job', 'UserLimits', 'Pattern',
     'JobEvent', 'JobEventType',
     'Created', 'CreatedMeta', 'StepDone', 'OrdersPlaced',
     'Paused', 'Resumed', 'Stopped', 'Finished', 'ErrorEvent', 'OpenOrderLog'

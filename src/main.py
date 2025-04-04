@@ -52,7 +52,6 @@ class TradeGuardHealth:
 
         # Initialize risk processor
         self.risk_processor = RiskProcessor(self.state_manager)
-        self.risk_processor.set_notification_callback(self._handle_risk_notification)
         # Pass the dedicated risk notifications Kafka handler to the risk processor
         self.risk_processor.set_kafka_handler(self.risk_notification_handler)
         logger.info("Risk processor initialized")
@@ -127,7 +126,7 @@ class TradeGuardHealth:
                 try:
                     user_id = job.user_id
                     # Pass the Job object directly, not a dictionary
-                    self.risk_processor.process_job_threaded(job, user_id)
+                    self.risk_processor.run_preset("limits_only", user_id)
                 except Exception as e:
                     logger.error(f"Error in risk processing for job {job.job_id}: {str(e)}", exc_info=True)
 
@@ -168,42 +167,6 @@ class TradeGuardHealth:
         except Exception as e:
             logger.error(f"Failed to initialize state from Kafka: {e}", exc_info=True)
             logger.warning("Continuing with empty state...")
-
-    def _handle_risk_notification(self, user_id: int, risk_level: RiskLevel, details: Dict[str, Any]) -> None:
-        """
-        Handle a risk notification from the risk processor.
-
-        Args:
-            user_id: User ID
-            risk_level: Risk level
-            details: Risk details
-        """
-        job_id = details.get("job_id", "unknown")
-        risk_type = details.get("risk_type", "unknown")
-        triggers = details.get("triggers", [])
-
-        # Extract trigger messages for logging
-        if not triggers:
-            trigger_messages = []
-        elif isinstance(triggers[0], str):
-            trigger_messages = triggers
-        else:
-            trigger_messages = [str(trigger) for trigger in triggers]
-
-        # Log detailed risk notification
-        log_message = (
-            f"RISK ALERT: User {user_id} has {risk_level.name} risk "
-            f"({risk_type}) on job {job_id}"
-        )
-
-        if risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
-            logger.warning(log_message)
-            logger.warning(f"Risk triggers: {', '.join(trigger_messages)}")
-        else:
-            logger.info(log_message)
-            logger.info(f"Risk triggers: {', '.join(trigger_messages)}")
-
-        # Note: Kafka publishing is now handled directly by the RiskProcessor
 
     def run(self) -> None:
         """Main application loop."""

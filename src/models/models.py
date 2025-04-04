@@ -10,15 +10,14 @@ from src.models.job_models import Job, JobEvent
 from src.models.user_models import UserLimits
 
 # Re-export risk models
-from src.models.risk_models import Risk, RiskReport, Trigger, RiskType, RiskLevel
+from src.models.risk_models import RiskReport, Pattern, RiskCategory, RiskLevel
 
 __all__ = [
     'Job',
     'JobEvent',
     'UserLimits',
-    'Risk',
     'RiskReport',
-    'Trigger',
-    'RiskType',
+    'Pattern',
+    'RiskCategory',
     'RiskLevel'
 ]

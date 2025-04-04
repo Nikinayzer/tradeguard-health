@@ -41,5 +41,5 @@ def create_evaluators():
         "position_size": PositionSizeEvaluator(),
         "time_pattern": TimePatternEvaluator(),
     }
-    
-    return evaluators 
+
+    return evaluators
