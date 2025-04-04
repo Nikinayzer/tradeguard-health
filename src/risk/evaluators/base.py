@@ -3,13 +3,72 @@ Base Risk Evaluator
 
 Provides the foundation class for all risk evaluators.
 """
+import math
 from abc import abstractmethod
+from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from src.models import Job, Pattern
 from src.utils.log_util import get_logger
 
 logger = get_logger()
+
+
+def apply_confidence_decay(confidence: float,
+                           event_time: datetime,
+                           current_time: Optional[datetime] = None,
+                           half_life_minutes: int = 120,
+                           ) -> float:
+    """
+    Apply time-based decay to a confidence value.
+
+    Uses exponential decay formula: confidence * (0.5)^(time/half_life)
+
+    Args: confidence: Original confidence value (0.0-1.0) event_time: When the event occurred current_time: Current
+    time (defaults to now) half_life_minutes: Minutes after which confidence is halved.
+     30-60 for Rapid Decay (FOMO, Panic),
+     120-240 for Intra-Day Patterns,
+     720-1440 for Daily Patterns
+
+    Returns:
+        Decayed confidence value
+    """
+    if confidence <= 0 or not event_time:
+        return confidence
+
+    if current_time is None:
+        current_time = datetime.now()
+
+    time_diff = (current_time - event_time).total_seconds() / 60.0
+    if time_diff < 0:
+        return confidence
+
+    decay_factor = math.pow(0.5, time_diff / half_life_minutes)
+    decayed_confidence = confidence * decay_factor
+
+    return decayed_confidence
+
+
+def calculate_dynamic_confidence(
+        violation_ratio: float,
+        base: float = 0.6,
+        scaling: float = 0.1,
+        boost: Optional[float] = 0.0,
+) -> float:
+    """
+    Calculates confidence based on a violation ratio using a log scale.
+
+    Args:
+        violation_ratio: How much the threshold was exceeded (e.g. 1.5 = 50% over).
+        base: Base confidence to start from.
+        scaling: How fast confidence grows.
+        boost: Optional extra boost from context (e.g. recent losses)
+
+    Returns:
+        Float confidence between 0 and max_confidence
+    """
+    adjusted = base + scaling * math.log1p((violation_ratio - 1) * 10) + boost
+    return min(1.0, adjusted)
 
 
 class BaseRiskEvaluator:
@@ -43,15 +102,3 @@ class BaseRiskEvaluator:
                 - data: Additional evidence data
         """
         raise NotImplementedError("Subclasses must implement evaluate()")
-
-    def calculate_aggregated_confidence(self, triggers: List[Pattern]) -> float:
-        """Weight triggers by their confidence (giving more weight to higher risks)."""
-        if not triggers:
-            return 0.0
-
-        sorted_triggers = sorted(triggers, key=lambda t: t.confidence, reverse=True)
-        # (1.0, 0.8, 0.6, 0.4, 0.2 for first 5)
-        weights = [1.0 - (i * 0.2) for i in range(min(5, len(sorted_triggers)))]
-
-        weighted_sum = sum(t.confidence * w for t, w in zip(sorted_triggers[:len(weights)], weights))
-        return weighted_sum / sum(weights)

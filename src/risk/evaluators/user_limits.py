@@ -9,6 +9,7 @@ This covers limits on:
 - Cooldown between trades
 - Concurrent jobs
 """
+import math
 
 import requests
 from datetime import datetime, timedelta
@@ -165,10 +166,15 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         amount = job.amount
         if amount > limits.max_position_size:
-            confidence = min(0.95, 0.6 + (amount / limits.max_position_size - 1) * 0.1)
+            BASE_CONFIDENCE = 0.6
+            SCALING_FACTOR = 0.1
+            MAX_CONFIDENCE = 1.0
 
-            # Use the explicit category mapping
-            category = self.RISK_CATEGORY_MAPPINGS["single_job_limit"].value
+            # 10 / 5 = 2
+            violation_ratio = amount / limits.max_position_size
+
+            confidence = BASE_CONFIDENCE + SCALING_FACTOR * math.log1p(violation_ratio * 10)
+            confidence = min(MAX_CONFIDENCE, confidence)
 
             patterns.append(Pattern(
                 pattern_id="single_job_limit",
