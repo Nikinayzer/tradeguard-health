@@ -21,8 +21,35 @@ class AggregationFactory:
 
     @staticmethod
     def calculate_aggregated_confidence(patterns: List[Pattern]) -> float:
-        return sum((p.confidence for p in patterns)) / len(patterns) if patterns else 0.0
-        # return max((p.confidence for p in patterns), default=0.0)
+        """
+        Calculate aggregated confidence using Noisy-OR method.
+        Noisy-OR is a probabilistic model for combining multiple binary signals, which works with "probability of no risk",
+        then converts back to "probability of risk" at the end.
+        
+        Noisy-OR treats each pattern as a partially reliable indicator of risk.
+        With this approach:
+        - Adding a new pattern will never decrease the overall confidence
+        - Multiple weaker signals can combine to produce a stronger signal
+        - A strong signal remains strong even with weaker additional signals
+        
+        Args:
+            patterns: List of patterns to aggregate
+            
+        Returns:
+            Aggregated confidence value between 0 and 1
+        """
+        if not patterns:
+            return 0.0
+
+        prob_no_risk = 1.0
+
+        for pattern in patterns:
+            # Confidence represents the pattern's "reliability" as a risk indicator
+            # (1 - confidence) is the probability this pattern gives a false alarm
+            # So we multiply the probability of no risk by (1 - confidence)
+            prob_no_risk *= (1.0 - pattern.confidence)
+
+        return 1.0 - prob_no_risk
 
     @staticmethod
     def aggregate(
