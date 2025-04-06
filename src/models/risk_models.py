@@ -1,7 +1,8 @@
 from datetime import datetime
 from enum import Enum
+import hashlib
 from typing import List, Dict, Any, Optional, Union, Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, computed_field
 
 from src.utils import log_util
 
@@ -38,6 +39,39 @@ class Pattern(BaseModel):
     confidence: float
     category_weights: Dict[RiskCategory, float]
     details: Optional[Dict[str, Any]] = None
+    start_time: Optional[datetime] = Field(default_factory=datetime.now)
+    end_time: Optional[datetime] = None  # point-in-time pattern
+    consumed: bool = False  # Flag to track if pattern is used in a composite pattern
+    is_composite: bool = False  # Flag to identify composite patterns
+    
+    @property
+    def timestamp(self) -> datetime:
+        """Legacy compatibility - returns end_time if available, otherwise start_time."""
+        return self.end_time or self.start_time
+    
+    @property
+    def duration_minutes(self) -> Optional[float]:
+        """Calculate pattern duration in minutes, if applicable."""
+        if not self.end_time or not self.start_time:
+            return None
+        return (self.end_time - self.start_time).total_seconds() / 60
+
+    @computed_field
+    @property
+    def internal_id(self) -> str:
+        """Generate a shorter, cleaner unique ID for pattern tracking."""
+        # Create a hash based on pattern_id, timestamp, and job_id
+        data = f"{self.pattern_id}_{self.timestamp.isoformat() if self.timestamp else ''}"
+        if self.job_id:
+            data += f"_{'_'.join(map(str, self.job_id))}"
+        
+        # Create a short hash (first 8 chars of md5)
+        hash_obj = hashlib.md5(data.encode())
+        short_hash = hash_obj.hexdigest()[:8]
+        
+        # Format: pattern_type:short_hash (e.g., "daily_limit:a1b2c3d4")
+        pattern_type = self.pattern_id.split('_')[0] if '_' in self.pattern_id else self.pattern_id
+        return f"{pattern_type}:{short_hash}"
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Pattern":
@@ -59,7 +93,9 @@ class RiskRepost(BaseModel):
     top_risk_type: RiskCategory
     category_scores: Dict[RiskCategory, float]
     patterns: List[Pattern]
+    composite_patterns: List[Pattern]
     decay_params: Dict[str, Any]
+    metadata: Dict[str, Any] = Field(default_factory=dict)  # Additional report metadata
     timestamp: datetime = Field(default_factory=datetime.now)
 
     class Config:

@@ -48,19 +48,6 @@ class RiskProcessor:
     Manages risk evaluation for jobs by running multiple evaluators independently.
     Each evaluator analyzes specific aspects of risk and sends its own report.
     """
-
-    RISK_TYPE_MAP = {
-        "overtrading": RiskCategory.OVERTRADING,
-        "fomo": RiskCategory.FOMO,
-        "sunk_cost": RiskCategory.SUNK_COST,
-        "position_size": RiskCategory.POSITION_SIZE,
-        "time_pattern": RiskCategory.TIME_PATTERN,
-        "portfolio_exposure": RiskCategory.PORTFOLIO_EXPOSURE,
-        "market_volatility": RiskCategory.MARKET_VOLATILITY,
-        "liquidity": RiskCategory.LIQUIDITY,
-        "execution": RiskCategory.EXECUTION
-    }
-
     def __init__(self, state_manager: StateManager):
         """
         Initialize the risk processor with evaluators and state manager.
@@ -73,6 +60,10 @@ class RiskProcessor:
         self.evaluation_queue = Queue(maxsize=1000)
         self.state_manager = state_manager
         self.kafka_handler = None
+        
+        # Initialize pattern composition engine
+        from src.risk.pattern_composition import PatternCompositionEngine
+        self.pattern_composition_engine = PatternCompositionEngine()
 
         self.presets = {  # todo make normal presets
             "limits_only": ["user_limits"],
@@ -98,7 +89,8 @@ class RiskProcessor:
             raise ValueError(f"Unknown preset: {preset_name}")
         evaluator_ids = self.presets[preset_name]
 
-        job_history = self.state_manager.get_user_jobs(user_id)
+        job_history = self.state_manager.get_user_jobs(user_id, 1)
+        logger.warning(job_history)
         return self.run_evaluators(evaluator_ids, user_id, job_history)
 
     def run_evaluators(self, evaluator_ids: List[str], user_id: int, job_history: Dict[int, Job]):
@@ -168,16 +160,47 @@ class RiskProcessor:
                     logger.info(f"[RiskProcessor] Evaluator {evaluator_id} returned NO patterns")
             except Exception as e:
                 logger.error(f"Error in evaluator {evaluator_id}: {str(e)}")
+
         if all_patterns:
-            report = AggregationFactory.aggregate(
-                all_patterns,
-                user_id,
-                job_id=None
-            )
-            if self.kafka_handler:
-                json_string = report.model_dump_json()
-                message = json.loads(json_string)
-                self.kafka_handler.send_message(message)
-                logger.info(f"[RiskProcessor] Sent report to Kafka.")
-            logger.info(f"[RiskProcessor] Aggregated report: {report.top_risk_type} at {report.top_risk_level}")
+            # Apply pattern composition to detect composite patterns
+            try:
+                composite_patterns = self.pattern_composition_engine.process_patterns(all_patterns)
+                if composite_patterns:
+                    logger.info(f"[RiskProcessor] Detected {len(composite_patterns)} composite patterns")
+                
+                # Get unconsumed patterns for logging purposes only
+                unconsumed_patterns = [p for p in all_patterns if not p.consumed]
+                logger.info(f"[RiskProcessor] {len(unconsumed_patterns)} unconsumed atomic patterns remain as awareness indicators")
+                
+                # Pass ALL original patterns (both consumed and unconsumed) to maintain full context
+                # The AggregationFactory will handle them differently based on their 'consumed' flag
+                report = AggregationFactory.aggregate(
+                    all_patterns,       # All original patterns (including consumed ones)
+                    composite_patterns, # Composite patterns get priority
+                    user_id,
+                    job_id=None
+                )
+                
+                if self.kafka_handler:
+                    json_string = report.model_dump_json()
+                    message = json.loads(json_string)
+                    self.kafka_handler.send_message(message)
+                    logger.info(f"[RiskProcessor] Sent report to Kafka.")
+                logger.info(f"[RiskProcessor] Aggregated report: {report.top_risk_type} at {report.top_risk_level}")
+            except Exception as e:
+                logger.error(f"Error in pattern composition: {str(e)}")
+                # Fallback to original aggregation if composition fails
+                report = AggregationFactory.aggregate(
+                    all_patterns,
+                    [], # Empty list for composite_patterns in fallback case
+                    user_id,
+                    job_id=None
+                )
+                
+                if self.kafka_handler:
+                    json_string = report.model_dump_json()
+                    message = json.loads(json_string)
+                    self.kafka_handler.send_message(message)
+                    logger.info(f"[RiskProcessor] Sent report to Kafka (fallback mode).")
+        
         return all_patterns

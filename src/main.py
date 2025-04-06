@@ -117,7 +117,6 @@ class TradeGuardHealth:
                 job.apply_event(event)
                 logger.info(f"Updated job {job.job_id} with {event.type} event")
 
-            # Store job in state
             self.state_manager.store_job(job)
             logger.info(f"Stored job {job.job_id} in state manager")
 
@@ -125,12 +124,10 @@ class TradeGuardHealth:
             if not is_historical and isinstance(event.type, Created):
                 try:
                     user_id = job.user_id
-                    # Pass the Job object directly, not a dictionary
                     self.risk_processor.run_preset("limits_only", user_id)
                 except Exception as e:
                     logger.error(f"Error in risk processing for job {job.job_id}: {str(e)}", exc_info=True)
 
-            # Update dashboards periodically during historical loading
             if is_historical and int(job.job_id) % 1000 == 0:
                 self._update_dashboards()
 

@@ -6,9 +6,10 @@ Provides thread-safe access to state and handles state updates from Kafka events
 """
 
 import logging
+import re
 from typing import Dict, Any, Optional
 from threading import Lock
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from src.models.job_models import Job
 from src.utils.log_util import get_logger
@@ -83,18 +84,56 @@ class StateManager:
                 return None
             return self._jobs_state.get(user_id, {}).get(job_id)
 
-    def get_user_jobs(self, user_id: int) -> Dict[int, Job]:
+    def _parse_timestamp(self, timestamp_str: str) -> datetime:
         """
-        Get all jobs for a specific user.
+        Parse a timestamp string into a datetime object.
+        Handles both ISO format and Kafka format with 'Z' timezone.
+        
+        Args:
+            timestamp_str: Timestamp string (e.g., "2025-04-06T19:58:33.305362822Z")
+            
+        Returns:
+            datetime object in UTC
+        """
+        # Remove nanoseconds precision if present (Python only handles microseconds)
+        if '.' in timestamp_str:
+            parts = timestamp_str.split('.')
+            # Keep only up to 6 digits for microseconds
+            if len(parts[1]) > 6:
+                if parts[1].endswith('Z'):
+                    microseconds = parts[1][:6]
+                    timestamp_str = f"{parts[0]}.{microseconds}Z"
+                else:
+                    microseconds = parts[1][:6]
+                    timestamp_str = f"{parts[0]}.{microseconds}"
+        
+        # Handle 'Z' timezone indicator (UTC)
+        if timestamp_str.endswith('Z'):
+            # Strip 'Z' and parse as UTC
+            dt = datetime.fromisoformat(timestamp_str[:-1])
+            return dt.replace(tzinfo=timezone.utc)
+        
+        try:
+            # Try to parse with timezone info
+            return datetime.fromisoformat(timestamp_str)
+        except ValueError:
+            # If no timezone, assume UTC
+            return datetime.fromisoformat(timestamp_str).replace(tzinfo=timezone.utc)
+
+    def get_user_jobs(self, user_id: int, hours: int = 24) -> Dict[int, Job]:
+        """
+        Get all jobs for a specific user within a specified timeframe.
         
         Args:
             user_id: The ID of the user
+            hours: Number of hours to look back (default: 24 hours)
             
         Returns:
-            Dictionary of jobs for the user
+            Dictionary of jobs for the user within the specified timeframe
         """
         with self._lock:
-            return self._jobs_state.get(user_id, {}).copy()
+            all_user_jobs = self._jobs_state.get(user_id, {}).copy()
+            return all_user_jobs
 
     def get_job_user(self, job_id: int) -> Optional[int]:
         """

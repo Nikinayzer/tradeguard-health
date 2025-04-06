@@ -22,8 +22,8 @@ class Job(BaseModel):
     amount: float = 0.0
     steps_total: int = 0
     duration_minutes: float = 0.0
-    timestamp: str  # created_at timestamp
-    last_updated: str  # updated_at timestamp
+    timestamp: str
+    last_updated: str
     status: Optional[str] = ""
     completed_steps: Optional[int] = 0
     orders: Optional[List[Dict[str, Any]]] = []

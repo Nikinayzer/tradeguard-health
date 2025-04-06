@@ -60,11 +60,11 @@ class KafkaHandler(Generic[T]):
             'enable.auto.commit': True,
             'client.id': f'tradeguard_health_{self.topic}_consumer',
             'stats_cb': connection_status_callback,
-            'session.timeout.ms': 10000,  # Reduce from default 45000ms
-            'max.poll.interval.ms': 60000,  # Reduce from default 300000ms
+            'session.timeout.ms': 10000,
+            'max.poll.interval.ms': 60000,
             'fetch.min.bytes': 1,
-            'fetch.max.bytes': 52428800,  # 50MB
-            'statistics.interval.ms': 30000  # Less frequent stats collection (30s vs 1s)
+            'fetch.max.bytes': 52428800,
+            'statistics.interval.ms': 30000
         })
         self.consumer.subscribe([self.topic])
 
