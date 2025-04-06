@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, ClassVar
 from pydantic import BaseModel, Field, field_validator
 
@@ -7,6 +7,7 @@ from src.models.job_events import (
     Paused, Resumed, ErrorEvent, Created
 )
 from src.utils import log_util
+from src.utils.datetime_utils import parse_timestamp, format_timestamp
 
 logger = log_util.get_logger()
 
@@ -22,16 +23,20 @@ class Job(BaseModel):
     amount: float = 0.0
     steps_total: int = 0
     duration_minutes: float = 0.0
-    timestamp: str
-    last_updated: str
+    timestamp: datetime
+    last_updated: datetime
     status: Optional[str] = ""
     completed_steps: Optional[int] = 0
     orders: Optional[List[Dict[str, Any]]] = []
 
-    # Constants for job types
     DCA_JOB_NAMES: ClassVar[List[str]] = ["dca", "Dca", "DCA"]
     LIQ_JOB_NAMES: ClassVar[List[str]] = ["liq", "Liq", "LIQ"]
     TERMINAL_STATUSES: ClassVar[List[str]] = ["Finished", "Stopped"]
+
+    class Config:
+        json_encoders = {
+            datetime: format_timestamp
+        }
 
     @property
     def id(self) -> int:
@@ -39,12 +44,12 @@ class Job(BaseModel):
         return self.job_id
 
     @property
-    def created_at(self) -> str:
-        """Alias for timestamp"""
+    def created_at(self) -> datetime:
+        """Return timestamp as datetime"""
         return self.timestamp
 
     @property
-    def updated_at(self) -> str:
+    def updated_at(self) -> datetime:
         """Return the last update timestamp"""
         return self.last_updated
 
@@ -91,13 +96,27 @@ class Job(BaseModel):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Job":
         """Create a Job from a dictionary."""
-        if 'last_updated' not in data:
-            data['last_updated'] = data.get('timestamp', '')
-        return cls(**data)
+        job_data = data.copy()
+        
+        if 'last_updated' not in job_data:
+            job_data['last_updated'] = job_data.get('timestamp', '')
+            
+        if 'timestamp' in job_data and isinstance(job_data['timestamp'], str):
+            job_data['timestamp'] = parse_timestamp(job_data['timestamp'])
+            
+        if 'last_updated' in job_data and isinstance(job_data['last_updated'], str):
+            job_data['last_updated'] = parse_timestamp(job_data['last_updated'])
+            
+        return cls(**job_data)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the model to a dictionary."""
-        return self.model_dump()
+        data = self.model_dump()
+        
+        data['timestamp'] = format_timestamp(self.timestamp)
+        data['last_updated'] = format_timestamp(self.last_updated)
+        
+        return data
 
     @classmethod
     def create_from_event(cls, event: JobEvent) -> 'Job':
@@ -122,7 +141,6 @@ class Job(BaseModel):
 
     def apply_event(self, event: JobEvent) -> None:
         """Update job state based on an event."""
-        # Update the last_updated timestamp
         self.last_updated = event.timestamp
         
         if isinstance(event.type, StepDone):
@@ -130,7 +148,6 @@ class Job(BaseModel):
             self.status = "In Progress"
             
         elif isinstance(event.type, OrdersPlaced):
-            # Append new orders to existing collection
             new_orders = [vars(order) for order in event.type.orders]
             self.orders.extend(new_orders)
             

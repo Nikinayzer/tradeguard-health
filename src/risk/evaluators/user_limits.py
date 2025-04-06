@@ -12,7 +12,7 @@ This covers limits on:
 import math
 
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 
 from src.models import Job
@@ -59,7 +59,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         patterns = []
 
         user_limits = self._get_user_limits(user_id)
-        
+
         # If we couldn't get valid user limits, return empty patterns
         if not user_limits:
             logger.error(f"Could not get valid user limits for user {user_id}, skipping evaluation")
@@ -137,6 +137,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             logger.error(f"Error fetching user limits for user {user_id}: {str(e)}")
             return None
 
+    # todo refactor to work with all jobs
     def _check_single_job_limit(self, job: Job, limits: UserLimits) -> List[Pattern]:
         """Check if job amount exceeds single job limit"""
         patterns = []
@@ -182,17 +183,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             logger.warning("Missing or invalid daily trades limit, skipping check")
             return patterns
 
-        today = datetime.now().date()
-        today_trades = []
-
-        for history_job in job_history.values():
-            job_timestamp = history_job.timestamp
-            if job_timestamp:
-                dt = DateTimeUtils.parse_timestamp(job_timestamp)
-                if dt and dt.date() == today:
-                    today_trades.append(history_job)
-
-        trade_count = len(today_trades) + 1
+        trade_count = len(job_history)
 
         if trade_count >= limits.max_daily_trades > 0:
             violation_rate = trade_count / limits.max_daily_trades
@@ -229,17 +220,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             logger.warning("Missing or invalid daily volume limit, skipping check")
             return patterns
 
-        today = datetime.now().date()
-        todays_volume = 0
-
+        total_volume = 0
         for history_job in job_history.values():
-            job_timestamp = history_job.timestamp
-            if job_timestamp:
-                dt = DateTimeUtils.parse_timestamp(job_timestamp)
-                if dt and dt.date() == today:
-                    todays_volume += history_job.amount
-
-        total_volume = todays_volume + job.amount
+            total_volume += history_job.amount
 
         if total_volume >= limits.max_daily_volume > 0:
             violation_rate = total_volume / limits.max_daily_volume
@@ -276,11 +259,8 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             logger.warning("Missing or invalid trade cooldown limit, skipping check")
             return patterns
 
-        current_timestamp = job.timestamp
-        if current_timestamp:
-            current_time = DateTimeUtils.parse_timestamp(current_timestamp) or datetime.now()
-        else:
-            current_time = datetime.now()
+        # Current job's timestamp as datetime
+        current_time = job.created_at
 
         most_recent_time = None
 
@@ -288,14 +268,11 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             if history_job.job_id == job.job_id:
                 continue
 
-            job_timestamp = history_job.timestamp
-            dt = DateTimeUtils.parse_timestamp(job_timestamp)
+            # Get timestamp as datetime directly
+            job_dt = history_job.created_at
 
-            if not dt:
-                continue
-
-            if most_recent_time is None or dt > most_recent_time:
-                most_recent_time = dt
+            if most_recent_time is None or job_dt > most_recent_time:
+                most_recent_time = job_dt
 
         # If no valid previous timestamp found, return early
         if not most_recent_time:
@@ -339,7 +316,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         # Count open jobs excluding the current one
         open_jobs = []
         for history_job in job_history.values():
-            if history_job.status in ["Created", "In Progress"] and history_job.job_id != job.job_id:
+            if history_job.is_active and history_job.job_id != job.job_id:
                 open_jobs.append(history_job)
 
         # Add current job to count
@@ -354,23 +331,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
             # Get IDs of open jobs for reference
             open_job_ids = [j.job_id for j in open_jobs]
-
-            # Use the explicit category mapping
-            category = self.RISK_CATEGORY_MAPPINGS["concurrent_jobs"].value
-
-            evidence.append({
-                "category_id": category,
-                "confidence": confidence,
-                "evaluator_id": self.evaluator_id,
-                "data": {
-                    "job_id": job.job_id,
-                    "open_jobs_count": open_jobs_count,
-                    "limit": max_concurrent,
-                    "ratio": ratio,
-                    "open_job_ids": open_job_ids,
-                    "reason": "Concurrent jobs limit exceeded"
-                }
-            })
 
         return evidence
 
@@ -393,7 +353,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 }
             ))
         return patterns
-
 
     def _check_consecutive_losses(self, job: Job, job_history: Dict[int, Job],
                                   limits: UserLimits) -> List[Dict[str, Any]]:

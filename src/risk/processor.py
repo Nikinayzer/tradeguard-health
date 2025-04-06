@@ -89,7 +89,7 @@ class RiskProcessor:
             raise ValueError(f"Unknown preset: {preset_name}")
         evaluator_ids = self.presets[preset_name]
 
-        job_history = self.state_manager.get_user_jobs(user_id, 1)
+        job_history = self.state_manager.get_user_jobs(user_id, 24)
         logger.warning(job_history)
         return self.run_evaluators(evaluator_ids, user_id, job_history)
 

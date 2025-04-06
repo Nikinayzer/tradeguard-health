@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Type, Union
 import logging
+
+from src.utils.datetime_utils import parse_timestamp, format_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +257,7 @@ _EVENT_TYPE_MAP: Dict[str, Type[JobEventType]] = {
 @dataclass
 class JobEvent:
     job_id: int
-    timestamp: str
+    timestamp: datetime  # Now explicitly a datetime object
     type: JobEventType
 
     @classmethod
@@ -268,16 +270,24 @@ class JobEvent:
             raise ValueError("Missing event_type in job event data")
 
         event = JobEventType.from_value(data['event_type'])
+        
+        # Handle timestamp parsing from string to datetime
+        timestamp_str = data.get('timestamp', datetime.now(timezone.utc).isoformat())
+        timestamp = parse_timestamp(timestamp_str) if isinstance(timestamp_str, str) else timestamp_str
+            
         return cls(
             job_id=data['job_id'],
-            timestamp=data.get('timestamp', datetime.now().isoformat()),
+            timestamp=timestamp,
             type=event
         )
 
     def to_dict(self) -> Dict[str, Any]:
+        # Format the datetime to ISO string with Z timezone
+        timestamp_str = format_timestamp(self.timestamp)
+        
         result = {
             'job_id': self.job_id,
-            'timestamp': self.timestamp,
+            'timestamp': timestamp_str,
             'event_type': self.type.type_name
         }
         # Optionally include extra fields for specific event types:

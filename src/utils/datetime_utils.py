@@ -2,8 +2,88 @@
 Utility functions for datetime operations.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Union
+
+
+def parse_timestamp(timestamp: Union[str, float, int, datetime]) -> datetime:
+    """
+    Parse a timestamp into a timezone-aware datetime object.
+    Optimized for Kafka-style timestamps (e.g., "2025-04-06T19:58:33.305362822Z").
+    
+    Args:
+        timestamp: String timestamp, epoch timestamp, or datetime object
+        
+    Returns:
+        Timezone-aware datetime object (UTC)
+        
+    Raises:
+        ValueError: If the timestamp cannot be parsed
+    """
+    # If already a datetime, ensure it has timezone
+    if isinstance(timestamp, datetime):
+        return timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+        
+    # If numeric, treat as epoch timestamp (UTC)
+    if isinstance(timestamp, (int, float)):
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        
+    # Handle string timestamps
+    if isinstance(timestamp, str):
+        # Handle Kafka-style timestamps (with Z for UTC)
+        if 'Z' in timestamp:
+            # Remove the 'Z' and parse
+            ts = timestamp.rstrip('Z')
+            
+            # Handle precision beyond microseconds
+            if '.' in ts:
+                parts = ts.split('.')
+                # Python only handles microseconds (6 digits)
+                if len(parts[1]) > 6:
+                    ts = f"{parts[0]}.{parts[1][:6]}"
+            
+            # Parse and add UTC timezone
+            try:
+                dt = datetime.fromisoformat(ts)
+                return dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass  # Try other formats
+                
+        # Try ISO 8601 with timezone
+        try:
+            return datetime.fromisoformat(timestamp)
+        except ValueError:
+            pass
+            
+        # Try ISO without timezone (assume UTC)
+        try:
+            dt = DateTimeUtils.parse_timestamp(timestamp)
+            if dt:
+                return dt.replace(tzinfo=timezone.utc)
+        except:
+            pass
+    
+    # If all parsing attempts fail
+    raise ValueError(f"Could not parse timestamp: {timestamp}")
+
+
+def format_timestamp(dt: datetime) -> str:
+    """
+    Format a datetime to Kafka-compatible ISO 8601 string with Z timezone.
+    
+    Args:
+        dt: Datetime object to format
+        
+    Returns:
+        Formatted string like "2025-04-06T19:58:33.305Z"
+    """
+    # Ensure datetime is in UTC
+    dt_utc = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    
+    # Format with millisecond precision and Z timezone
+    formatted = dt_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return formatted
+
 
 class DateTimeUtils:
     """Utility class for datetime operations."""
