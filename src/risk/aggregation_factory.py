@@ -19,13 +19,17 @@ class AggregationFactory:
             return RiskLevel.LOW
         return RiskLevel.NONE
 
+    # TODO Even though it works, I can't really justify use of noisy-or model with dependent factors. But in
+    #  practice, works well.
     @staticmethod
     def calculate_aggregated_confidence(patterns: List[Pattern]) -> float:
         """
         Calculate aggregated confidence using Noisy-OR method.
-        Noisy-OR is a probabilistic model for combining multiple binary signals, which works with "probability of no risk",
-        then converts back to "probability of risk" at the end.
-        
+        Noisy-OR is a probabilistic model for combining binary signals, which works with probability of no risk,
+        then converts back to probability of risk at the end.
+        EXAMPLE:
+        Array of possibilities: (0.7 , 0.5)
+        Formula: (1 - 0.7) × (1 - 0.5) = 0.15 => 1 - 0.15 = 0.85
         Noisy-OR treats each pattern as a partially reliable indicator of risk.
         With this approach:
         - Adding a new pattern will never decrease the overall confidence
@@ -44,9 +48,6 @@ class AggregationFactory:
         prob_no_risk = 1.0
 
         for pattern in patterns:
-            # Confidence represents the pattern's "reliability" as a risk indicator
-            # (1 - confidence) is the probability this pattern gives a false alarm
-            # So we multiply the probability of no risk by (1 - confidence)
             prob_no_risk *= (1.0 - pattern.confidence)
 
         return 1.0 - prob_no_risk
@@ -60,21 +61,21 @@ class AggregationFactory:
     ) -> RiskRepost:
 
         category_to_patterns: Dict[RiskCategory, List[Pattern]] = defaultdict(list)
-        
+
         # Process composite patterns first (already boosted in composition logic)
         for pattern in composite_patterns:
             for category, weight in pattern.category_weights.items():
                 weighted_pattern = Pattern(**pattern.dict())
                 weighted_pattern.confidence *= weight  # Apply category weight, but no additional boost
                 category_to_patterns[category].append(weighted_pattern)
-        
+
         # Then process unconsumed atomic patterns with 50% weight
         for pattern in patterns:
             if not pattern.is_composite and not pattern.consumed:
                 for category, weight in pattern.category_weights.items():
                     weighted_pattern = Pattern(**pattern.dict())
                     # Apply 50% factor to atomic patterns to give composites higher priority
-                    weighted_pattern.confidence *= weight * 0.5  
+                    weighted_pattern.confidence *= weight * 0.5
                     category_to_patterns[category].append(weighted_pattern)
 
         # Compute final category scores using weighted aggregation
@@ -82,12 +83,12 @@ class AggregationFactory:
             cat: AggregationFactory.calculate_aggregated_confidence(pats)
             for cat, pats in category_to_patterns.items()
         }
-        
+
         # Count pattern types for metadata
         consumed_count = sum(1 for p in patterns if p.consumed)
         unconsumed_count = sum(1 for p in patterns if not p.consumed and not p.is_composite)
         awareness_patterns = [p for p in patterns if not p.consumed and not p.is_composite]
-        
+
         # Create metadata
         metadata = {
             "pattern_stats": {
