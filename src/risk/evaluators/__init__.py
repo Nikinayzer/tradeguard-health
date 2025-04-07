@@ -12,6 +12,7 @@ from src.risk.evaluators.position_size import PositionSizeEvaluator
 from src.risk.evaluators.time_pattern import TimePatternEvaluator
 from src.risk.evaluators.user_limits import UserLimitsEvaluator
 from src.risk.evaluators.batch_analyzer import UserBatchAnalyzer
+from src.risk.evaluators.position_behavior import PositionBehaviorEvaluator
 
 __all__ = [
     'BaseRiskEvaluator',
@@ -22,6 +23,7 @@ __all__ = [
     'TimePatternEvaluator',
     'UserLimitsEvaluator',
     'UserBatchAnalyzer',
+    'PositionBehaviorEvaluator',
     'create_evaluators'
 ]
 
@@ -40,6 +42,7 @@ def create_evaluators():
         "sunk_cost": SunkCostEvaluator(),
         "position_size": PositionSizeEvaluator(),
         "time_pattern": TimePatternEvaluator(),
+        "position_behavior": PositionBehaviorEvaluator(),
     }
 
     return evaluators
