@@ -40,7 +40,7 @@ class Job(BaseModel):
 
     @property
     def id(self) -> int:
-        """Alias for job_id to maintain compatibility with existing code"""
+        """Alias for job_id"""
         return self.job_id
 
     @property

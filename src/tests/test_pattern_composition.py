@@ -232,7 +232,7 @@ class TestPatternCompositionEngine(unittest.TestCase):
                 job_id=[self.job_id_1],
                 message="High market volatility",
                 confidence=0.4,
-                category_weights={RiskCategory.FOMO: 0.8, RiskCategory.MARKET_VOLATILITY: 0.2},
+                category_weights={RiskCategory.FOMO: 0.8, RiskCategory.SUNK_COST: 0.2},
                 start_time=self.current_time - timedelta(minutes=30)
             ),
             Pattern(

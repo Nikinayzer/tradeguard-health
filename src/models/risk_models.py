@@ -14,12 +14,7 @@ class RiskCategory(str, Enum):
     OVERTRADING = "overtrading"
     FOMO = "fomo"
     SUNK_COST = "sunk_cost"
-    POSITION_SIZE = "position_size"
-    TIME_PATTERN = "time_pattern"
-    PORTFOLIO_EXPOSURE = "portfolio_exposure"
-    MARKET_VOLATILITY = "market_volatility"
-    LIQUIDITY = "liquidity"
-    EXECUTION = "execution"
+    OVERCONFIDENCE = "overconfidence"
 
 
 class RiskLevel(str, Enum):

@@ -69,7 +69,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         patterns.extend(self._check_daily_trades_limit(job, job_history, user_limits))
         patterns.extend(self._check_daily_volume_limit(job, job_history, user_limits))
         patterns.extend(self._check_trade_cooldown(job, job_history, user_limits))
-        # patterns.extend(self._check_concurrent_jobs(job, job_history, user_limits))
+        patterns.extend(self._check_concurrent_jobs(job, job_history, user_limits))
         #
         # patterns.extend(self._check_consecutive_losses(job, job_history, user_limits))
         # patterns.extend(self._check_liquidity_threshold(job, user_limits))
@@ -308,31 +308,57 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         return patterns
 
+    # todo later if needed - rewrite using timestamp searching retrospectively
     def _check_concurrent_jobs(self, job: Job, job_history: Dict[int, Job],
-                               limits: UserLimits) -> List[Dict[str, Any]]:
+                               limits: UserLimits) -> List[Pattern]:
         """Check if concurrent jobs limit is exceeded"""
-        evidence = []
+        patterns = []
+
+        if not limits or not hasattr(limits, 'max_concurrent_jobs') or not limits.max_concurrent_jobs:
+            logger.warning("Missing or invalid concurrent jobs limit, skipping check")
+            return patterns
 
         # Count open jobs excluding the current one
         open_jobs = []
         for history_job in job_history.values():
-            if history_job.is_active and history_job.job_id != job.job_id:
+            if history_job.is_active:
                 open_jobs.append(history_job)
 
-        # Add current job to count
-        open_jobs_count = len(open_jobs) + 1
+        open_jobs_count = len(open_jobs) - 1
         max_concurrent = limits.max_concurrent_jobs
 
         # Check if limit exceeded
         if open_jobs_count > max_concurrent:
             # Calculate confidence based on severity of violation
-            ratio = open_jobs_count / max_concurrent
-            confidence = min(0.95, 0.6 + (ratio - 1) * 0.1)
+            violation_ratio = open_jobs_count / max_concurrent
 
-            # Get IDs of open jobs for reference
+            # Use our dynamic confidence calculation for consistency
+            confidence = self.calculate_dynamic_confidence(
+                violation_ratio,
+                base=0.4,
+                scaling=0.25,
+            )
+
             open_job_ids = [j.job_id for j in open_jobs]
 
-        return evidence
+            # Create the pattern
+            patterns.append(Pattern(
+                pattern_id="concurrent_jobs_limit",
+                job_id=open_job_ids,
+                message=f"Concurrent jobs limit exceeded",
+                confidence=confidence,
+                category_weights={
+                    RiskCategory.OVERTRADING: 0.7,
+                    RiskCategory.FOMO: 0.3
+                },
+                details={
+                    "actual": open_jobs_count,
+                    "limit": max_concurrent,
+                    "ratio": violation_ratio,
+                }
+            ))
+
+        return patterns
 
     def _check_allow_job(self, job: Job, job_history: Dict[int, Job], limits: UserLimits) -> List[Pattern]:
         patterns = []
