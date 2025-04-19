@@ -75,26 +75,19 @@ class KafkaHandler(Generic[T]):
             'statistics.interval.ms': 1000
         })
 
-    def _handle_consumer_error(self, msg) -> bool:
-        """
-        Handle consumer errors. Returns True if an error was handled and the caller
-        should continue, or False if the error should break processing.
-        """
+    def _handle_consumer_error(self, msg):
         if msg.error():
             error_code = msg.error().code()
-            if error_code == KafkaError.PARTITION_EOF:
-                logger.debug(f"Reached end of partition {msg.partition()}")
-            elif error_code == KafkaError.OFFSET_OUT_OF_RANGE:
-                # For offset out of range, just seek to the beginning of the partition
-                try:
-                    tp = TopicPartition(msg.topic(), msg.partition())
-                    self.consumer.seek(tp)  # Seek to beginning
-                    logger.debug(f"Reset partition {msg.partition()} to beginning")
-                except Exception as e:
-                    logger.warning(f"Could not reset offset for partition {msg.partition()}: {e}")
+            if error_code == KafkaError._PARTITION_EOF:
+                # End of partition event - not really an error
+                return False
+            elif error_code == KafkaError._TRANSPORT:
+                # Not an error, but a transport event
+                return False
             else:
-                logger.error(f"Consumer error: {msg.error()}")
-            return True
+                # Real error
+                self.logger.error(f"Consumer error: {msg.error()}")
+                return True
         return False
 
     def read_topic_from_beginning(self, max_messages: int = 1000000) -> Iterator[T]:
