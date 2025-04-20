@@ -7,7 +7,7 @@ from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, Topi
 
 from src.config.config import Config
 from src.handlers.kafka_callbacks import delivery_report, connection_status_callback
-from src.models.job_updates import JobEvent
+from src.models.job_events import JobEvent
 from src.utils import log_util
 
 logger = log_util.get_logger()
@@ -84,9 +84,13 @@ class KafkaHandler(Generic[T]):
             elif error_code == KafkaError._TRANSPORT:
                 # Not an error, but a transport event
                 return False
+            elif error_code == KafkaError._TIMED_OUT:
+                # Timeout - not a fatal error
+                logger.warning(f"Consumer timeout: {msg.error()}")
+                return False
             else:
                 # Real error
-                self.logger.error(f"Consumer error: {msg.error()}")
+                logger.error(f"Consumer error: {msg.error()}")
                 return True
         return False
 

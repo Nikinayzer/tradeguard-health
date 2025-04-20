@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, ClassVar
 from pydantic import BaseModel, Field, field_validator
 
-from src.models.job_updates import (
+from src.models.job_events import (
     JobEvent, StepDone, OrdersPlaced, Finished, 
     Paused, Resumed, ErrorEvent, Created
 )

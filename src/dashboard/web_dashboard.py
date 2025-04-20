@@ -895,24 +895,21 @@ class WebDashboard:
         return result
     
     def start_server(self):
-        """Start the FastAPI server in the current thread."""
-        logger.info(f"Starting web dashboard at http://localhost:{Config.DASHBOARD_PORT}")
-
-        uvicorn.run(
-            app, 
-            host=Config.DASHBOARD_HOST, 
-            port=Config.DASHBOARD_PORT,
-            log_level="warning",
-            access_log=False
-        )
+        """Start the web server in the current thread."""
+        logger.info("Starting web dashboard at http://localhost:8081")
+        uvicorn.run(app, host="0.0.0.0", port=8081)
     
     def start_server_in_thread(self):
-        """Start the FastAPI server in a background thread."""
-        self.running = True
-        self.server_thread = threading.Thread(
-            target=self.start_server,
-            daemon=True
-        )
+        """Start the web server in a background thread."""
+        logger.info("Starting web dashboard in background thread at http://0.0.0.0:8081")
+        self.server_thread = threading.Thread(target=self.start_server, daemon=True)
         self.server_thread.start()
-        logger.info(f"Web dashboard started in background thread at http://{Config.DASHBOARD_HOST}:{Config.DASHBOARD_PORT}")
-        return self.server_thread
+
+    def stop_server(self):
+        """Stop the web server."""
+        if self.server:
+            logger.info("Stopping web dashboard server...")
+            self.server.should_exit = True
+            if self.server_thread:
+                self.server_thread.join(timeout=5)
+                logger.info("Web dashboard server stopped")

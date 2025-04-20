@@ -14,8 +14,8 @@ class Config:
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:19092')
     KAFKA_CONSUMER_GROUP: str = os.getenv('KAFKA_CONSUMER_GROUP', 'tradeguard-health')
-    KAFKA_JOBS_TOPIC: str = os.getenv('KAFKA_JOBS_TOPIC', 'jobs')
-    KAFKA_RISK_NOTIFICATIONS_TOPIC: str = os.getenv('KAFKA_RISK_NOTIFICATIONS_TOPIC', 'risk_notifications')
+    KAFKA_JOB_UPDATES_TOPIC: str = os.getenv('KAFKA_JOB_UPDATES_TOPIC', 'job-updates')
+    KAFKA_RISK_NOTIFICATIONS_TOPIC: str = os.getenv('KAFKA_RISK_NOTIFICATIONS_TOPIC', 'risk-notifications')
 
     # API
     API_BASE_URL: str = os.getenv('API_BASE_URL', 'http://localhost:8080')
@@ -49,8 +49,8 @@ class Config:
             return "KAFKA_BOOTSTRAP_SERVERS is not set"
         if not cls.KAFKA_CONSUMER_GROUP:
             return "KAFKA_CONSUMER_GROUP is not set"
-        if not cls.KAFKA_JOBS_TOPIC:
-            return "KAFKA_JOBS_TOPIC is not set"
+        if not cls.KAFKA_JOB_UPDATES_TOPIC:
+            return "KAFKA_JOB_UPDATES_TOPIC is not set"
         if not cls.KAFKA_RISK_NOTIFICATIONS_TOPIC:
             return "KAFKA_RISK_NOTIFICATIONS_TOPIC is not set"
 

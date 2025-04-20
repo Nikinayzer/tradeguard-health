@@ -4,7 +4,7 @@ Provides domain models for all entities in the system.
 """
 
 # Import event models first to avoid circular imports
-from src.models.job_updates import (
+from src.models.job_events import (
     JobEvent, JobEventType, 
     Created, Paused, Resumed, Stopped, Finished,
     StepDone, OrdersPlaced, CanceledOrders,

@@ -39,7 +39,7 @@ class TradeGuardHealth:
 
         # Initialize job processor and kafka handler
         self.job_handler = KafkaHandler(
-            Config.KAFKA_JOBS_TOPIC,
+            Config.KAFKA_JOB_UPDATES_TOPIC,
             JobEvent,
             JobEvent.from_dict)
             
