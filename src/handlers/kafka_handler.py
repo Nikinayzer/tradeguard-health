@@ -7,7 +7,7 @@ from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, Topi
 
 from src.config.config import Config
 from src.handlers.kafka_callbacks import delivery_report, connection_status_callback
-from src.models.job_events import JobEvent
+from src.models.job_updates import JobEvent
 from src.utils import log_util
 
 logger = log_util.get_logger()
