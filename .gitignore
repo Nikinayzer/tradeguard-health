@@ -2,3 +2,9 @@
 /logs/trade_guide_health.log
 /.idea
 /logs/
+# Python compiled files
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
