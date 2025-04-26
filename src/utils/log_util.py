@@ -7,9 +7,9 @@ BASE_LOGGER_PREFIX = 'tradeguard.health'
 log_file = get_log_file_path()
 log_file.parent.mkdir(parents=True, exist_ok=True)
 
-global_level = Config.LOG_LEVEL
-kafka_level = global_level if (global_level == "DEBUG") else Config.LOG_LEVEL_KAFKA
-job_processor_level = global_level if (global_level == "DEBUG") else Config.LOG_LEVEL_JOB_PROCESSOR
+global_level = Config.RS_LOG
+kafka_level = global_level if (global_level == "DEBUG") else Config.KAFKA_LOG
+job_processor_level = global_level if (global_level == "DEBUG") else Config.RS_LOG_JOB_PROCESSOR
 
 LOGGING_CONFIG = {
     "version": 1,

@@ -95,7 +95,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 return self.user_limits_cache[user_id]
 
         try:
-            url = f"{Config.API_BASE_URL}{Config.API_USER_LIMITS_PATH.format(user_id=user_id)}"
+            url = f"{Config.BFF_BASE_URL}{Config.API_USER_LIMITS_PATH.format(user_id=user_id)}"
             logger.debug(f"Fetching limits for user {user_id} from {url}")
 
             response = requests.get(url=url, timeout=10.0)

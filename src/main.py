@@ -39,13 +39,13 @@ class TradeGuardHealth:
 
         # Initialize job processor and kafka handler
         self.job_handler = KafkaHandler(
-            Config.KAFKA_JOB_UPDATES_TOPIC,
+            Config.KAFKA_TOPIC_JOB_UPDATES,
             JobEvent,
             JobEvent.from_dict)
             
         # Create a dedicated Kafka handler for risk notifications
         self.risk_notification_handler = KafkaHandler(
-            Config.KAFKA_RISK_NOTIFICATIONS_TOPIC,
+            Config.KAFKA_TOPIC_RISK_NOTIFICATIONS,
             dict,  # We're just sending dictionaries for risk notifications
             lambda x: x  # Simple identity deserializer
         )
