@@ -52,7 +52,7 @@ class TradeGuardHealth:
         
         # Create a Kafka handler for position updates
         self.position_handler = KafkaHandler(
-            Config.KAFKA_POSITIONS_TOPIC,
+            Config.KAFKA_TOPIC_POSITION_UPDATES,
             Position,
             Position.from_dict
         )

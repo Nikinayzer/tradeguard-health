@@ -8,14 +8,17 @@ load_dotenv()
 class Config:
     # Loging
     RS_LOG: str = os.getenv('RS_LOG', 'INFO').upper()
-    KAFKA_LOG = os.getenv('KAFKA_LOG', 'INFO').upper()
-    RS_LOG_JOB_PROCESSOR = os.getenv('RS_LOG_JOB_PROCESSOR', 'INFO').upper()
+    KAFKA_LOG: str = os.getenv('KAFKA_LOG', 'INFO').upper()
+    RS_LOG_JOB_PROCESSOR: str = os.getenv('RS_LOG_JOB_PROCESSOR', 'INFO').upper()
 
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:19092')
     KAFKA_CONSUMER_GROUP: str = os.getenv('KAFKA_CONSUMER_GROUP', 'tradeguard-health')
     KAFKA_TOPIC_JOB_UPDATES: str = os.getenv('KAFKA_TOPIC_JOB_UPDATES', 'job-updates')
     KAFKA_TOPIC_RISK_NOTIFICATIONS: str = os.getenv('KAFKA_TOPIC_RISK_NOTIFICATIONS', 'risk-notifications')
+    KAFKA_TOPIC_POSITION_UPDATES: str = os.getenv('KAFKA_TOPIC_POSITION_UPDATES', 'position-updates')
+    KAFKA_TOPIC_ORDER_FLOW: str = os.getenv('KAFKA_TOPIC_ORDER_FLOW', 'order-flow')
+    KAFKA_TOPIC_EQUITY: str = os.getenv('KAFKA_TOPIC_EQUITY', 'equity')
 
     # API
     BFF_BASE_URL: str = os.getenv('BFF_BASE_URL', 'http://localhost:8080/api')
