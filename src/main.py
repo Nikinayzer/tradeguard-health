@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional
 
 from src.config.config import Config
 from src.handlers.kafka_handler import KafkaHandler, TopicConfig
-from src.models import JobEvent, Created, Job
+from src.models import JobEvent, Created, Job, Position
 
 from src.dashboard.web_dashboard import WebDashboard
 from src.utils.log_util import setup_logging, get_logger
@@ -49,6 +49,14 @@ class TradeGuardHealth:
             dict,  # We're just sending dictionaries for risk notifications
             lambda x: x  # Simple identity deserializer
         )
+        
+        # Create a Kafka handler for position updates
+        self.position_handler = KafkaHandler(
+            Config.KAFKA_POSITIONS_TOPIC,
+            Position,
+            Position.from_dict
+        )
+        logger.info("Position Kafka handler initialized")
 
         # Initialize risk processor
         self.risk_processor = RiskProcessor(self.state_manager)
@@ -88,11 +96,13 @@ class TradeGuardHealth:
         logger.info(f"latest job state: {self.state_manager.get_jobs_state()}")
         if self.web_dashboard:
             try:
+                positions_state = self.state_manager.get_positions_state()
                 self.web_dashboard.set_state_data(
                     self.state_manager.get_jobs_state(),
                     self.state_manager.get_dca_jobs(),
                     self.state_manager.get_liq_jobs(),
-                    self.state_manager.get_job_to_user_map()
+                    self.state_manager.get_job_to_user_map(),
+                    positions_state  # Add positions to dashboard
                 )
             except Exception as e:
                 logger.error(f"Error updating web dashboard: {e}", exc_info=True)
@@ -133,6 +143,24 @@ class TradeGuardHealth:
 
         except Exception as e:
             logger.error(f"Error processing event for job {event.job_id}: {e}", exc_info=True)
+    
+    def _process_position(self, position: Position) -> None:
+        """
+        Process a position update:
+        1. Store position in state manager
+        2. Trigger risk analysis if appropriate
+        """
+        try:
+            # Store the position
+            self.state_manager.store_position(position)
+            logger.info(f"Updated position for {position.symbol} on {position.venue} for user {position.user_id}")
+            
+            # Optionally trigger risk analysis for position updates
+            # This can be customized based on your risk rules
+            # self.risk_processor.run_preset("position_risk", position.user_id)
+            
+        except Exception as e:
+            logger.error(f"Error processing position: {e}", exc_info=True)
 
     def _initialize_state_from_kafka(self) -> None:
         """
@@ -160,6 +188,22 @@ class TradeGuardHealth:
 
             logger.info(f"State initialization complete. Processed {count} historical events.")
             logger.info(f"Loaded {total_jobs} jobs: {total_dca_jobs} DCA jobs, {total_liq_jobs} LIQ jobs")
+            
+            # Initialize positions from Kafka if needed
+            logger.info("Initializing positions from Kafka...")
+            try:
+                historical_positions = self.position_handler.read_topic_from_beginning()
+                position_count = 0
+                for position in historical_positions:
+                    self.state_manager.store_position(position)
+                    position_count += 1
+                    if position_count % 100 == 0:
+                        logger.info(f"Processed {position_count} historical positions...")
+                
+                logger.info(f"Loaded {position_count} positions")
+            except Exception as e:
+                logger.error(f"Failed to initialize positions from Kafka: {e}", exc_info=True)
+                logger.warning("Continuing with empty positions state...")
 
         except Exception as e:
             logger.error(f"Failed to initialize state from Kafka: {e}", exc_info=True)
@@ -179,9 +223,27 @@ class TradeGuardHealth:
         signal.signal(signal.SIGTERM, signal_handler)
 
         try:
-            logger.info("Starting to process messages...")
-
-            self.job_handler.process_messages(self._process_job_event)
+            # Start processing job and position messages in separate threads
+            logger.info("Starting to process job messages...")
+            job_thread = threading.Thread(
+                target=self.job_handler.process_messages,
+                args=(self._process_job_event,),
+                daemon=True
+            )
+            job_thread.start()
+            
+            logger.info("Starting to process position messages...")
+            position_thread = threading.Thread(
+                target=self.position_handler.process_messages,
+                args=(self._process_position,),
+                daemon=True
+            )
+            position_thread.start()
+            
+            # Keep the main thread alive
+            while True:
+                time.sleep(1)
+                
         except KeyboardInterrupt:
             logger.info("Shutting down...")
         finally:
@@ -200,6 +262,10 @@ class TradeGuardHealth:
             if hasattr(self, 'risk_notification_handler') and self.risk_notification_handler:
                 self.risk_notification_handler.close()
                 logger.info("Risk notification Kafka handler closed")
+                
+            if hasattr(self, 'position_handler') and self.position_handler:
+                self.position_handler.close()
+                logger.info("Position Kafka handler closed")
         except Exception as e:
             logger.error(f"Error closing Kafka handlers: {e}", exc_info=True)
 

@@ -12,9 +12,10 @@ logger = log_util.get_logger()
 class RiskCategory(str, Enum):
     """Enumeration of risk categories"""
     OVERTRADING = "overtrading"
+    # OVERCONFIDENCE = "overconfidence"
     FOMO = "fomo"
+    LOSS_BEHAVIOR = "loss_behavior"  # loss-aversion + loss-seeking
     SUNK_COST = "sunk_cost"
-    OVERCONFIDENCE = "overconfidence"
 
 
 class RiskLevel(str, Enum):
@@ -38,12 +39,12 @@ class Pattern(BaseModel):
     end_time: Optional[datetime] = None  # point-in-time pattern
     consumed: bool = False  # Flag to track if pattern is used in a composite pattern
     is_composite: bool = False  # Flag to identify composite patterns
-    
+
     @property
     def timestamp(self) -> datetime:
         """Legacy compatibility - returns end_time if available, otherwise start_time."""
         return self.end_time or self.start_time
-    
+
     @property
     def duration_minutes(self) -> Optional[float]:
         """Calculate pattern duration in minutes, if applicable."""
@@ -59,11 +60,11 @@ class Pattern(BaseModel):
         data = f"{self.pattern_id}_{self.timestamp.isoformat() if self.timestamp else ''}"
         if self.job_id:
             data += f"_{'_'.join(map(str, self.job_id))}"
-        
+
         # Create a short hash (first 8 chars of md5)
         hash_obj = hashlib.md5(data.encode())
         short_hash = hash_obj.hexdigest()[:8]
-        
+
         # Format: pattern_type:short_hash (e.g., "daily_limit:a1b2c3d4")
         pattern_type = self.pattern_id.split('_')[0] if '_' in self.pattern_id else self.pattern_id
         return f"{pattern_type}:{short_hash}"

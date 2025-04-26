@@ -12,6 +12,7 @@ from threading import Lock
 from datetime import datetime, timedelta, timezone
 
 from src.models.job_models import Job
+from src.models.position_models import Position
 from src.utils.log_util import get_logger
 
 logger = get_logger()
@@ -25,13 +26,20 @@ class StateManager:
 
     def __init__(self):
         """Initialize the state manager with empty state."""
+        # Job state storage
         self._jobs_state: Dict[int, Dict[int, Job]] = {}
         self._dca_jobs: Dict[int, Dict[int, Job]] = {}
         self._liq_jobs: Dict[int, Dict[int, Job]] = {}
         self._job_to_user_map: Dict[int, int] = {}
+        
+        # Position state storage
+        self._positions_state: Dict[int, Dict[str, Position]] = {}  # user_id -> position_key -> Position
+        self._venue_positions: Dict[str, Dict[str, Position]] = {}  # venue -> position_key -> Position
+        
         self._lock = Lock()
         logger.info("State manager initialized")
 
+    # Job-related methods
     def store_job(self, job: Job) -> None:
         """
         Store a job in the state.
@@ -227,4 +235,89 @@ class StateManager:
             self._dca_jobs.clear()
             self._liq_jobs.clear()
             self._job_to_user_map.clear()
+            self._positions_state.clear()
+            self._venue_positions.clear()
             logger.info("State cleared")
+
+    # Position-related methods
+    def store_position(self, position: Position) -> None:
+        """
+        Store a position in the state.
+        
+        Args:
+            position: The position to store
+        """
+        with self._lock:
+            try:
+                user_id = position.user_id
+                venue = position.venue
+                position_key = position.position_key
+                
+                # Initialize user's positions state if needed
+                if user_id not in self._positions_state:
+                    self._positions_state[user_id] = {}
+                
+                # Initialize venue positions if needed
+                if venue not in self._venue_positions:
+                    self._venue_positions[venue] = {}
+                
+                # Store the position by its key
+                self._positions_state[user_id][position_key] = position
+                self._venue_positions[venue][position_key] = position
+                
+                logger.debug(f"Stored position {position_key} for user {user_id} on venue {venue}")
+                
+            except Exception as e:
+                logger.error(f"Error storing position: {e}")
+    
+    def get_user_positions(self, user_id: int) -> Dict[str, Position]:
+        """
+        Get all positions for a specific user.
+        
+        Args:
+            user_id: The ID of the user
+            
+        Returns:
+            Dictionary of positions for the user
+        """
+        with self._lock:
+            return self._positions_state.get(user_id, {}).copy()
+    
+    def get_venue_positions(self, venue: str) -> Dict[str, Position]:
+        """
+        Get all positions for a specific venue.
+        
+        Args:
+            venue: The venue name
+            
+        Returns:
+            Dictionary of positions for the venue
+        """
+        with self._lock:
+            return self._venue_positions.get(venue, {}).copy()
+    
+    def get_position(self, user_id: int, venue: str, symbol: str) -> Optional[Position]:
+        """
+        Get a specific position by user, venue and symbol.
+        
+        Args:
+            user_id: The ID of the user
+            venue: The venue name
+            symbol: The trading symbol
+            
+        Returns:
+            The position if found, None otherwise
+        """
+        with self._lock:
+            position_key = f"{venue}_{symbol}"
+            return self._positions_state.get(user_id, {}).get(position_key)
+    
+    def get_positions_state(self) -> Dict[int, Dict[str, Position]]:
+        """
+        Get a copy of the entire positions state.
+        
+        Returns:
+            Dictionary mapping user IDs to their positions
+        """
+        with self._lock:
+            return {user_id: positions.copy() for user_id, positions in self._positions_state.items()}

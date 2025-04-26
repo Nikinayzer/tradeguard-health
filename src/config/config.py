@@ -16,6 +16,7 @@ class Config:
     KAFKA_CONSUMER_GROUP: str = os.getenv('KAFKA_CONSUMER_GROUP', 'tradeguard-health')
     KAFKA_JOB_UPDATES_TOPIC: str = os.getenv('KAFKA_JOB_UPDATES_TOPIC', 'job-updates')
     KAFKA_RISK_NOTIFICATIONS_TOPIC: str = os.getenv('KAFKA_RISK_NOTIFICATIONS_TOPIC', 'risk-notifications')
+    KAFKA_POSITIONS_TOPIC: str = os.getenv('KAFKA_POSITIONS_TOPIC', 'positions')
 
     # API
     API_BASE_URL: str = os.getenv('API_BASE_URL', 'http://localhost:8080')
@@ -53,5 +54,7 @@ class Config:
             return "KAFKA_JOB_UPDATES_TOPIC is not set"
         if not cls.KAFKA_RISK_NOTIFICATIONS_TOPIC:
             return "KAFKA_RISK_NOTIFICATIONS_TOPIC is not set"
+        if not cls.KAFKA_POSITIONS_TOPIC:
+            return "KAFKA_POSITIONS_TOPIC is not set"
 
         return None

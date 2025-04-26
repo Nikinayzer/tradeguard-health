@@ -18,13 +18,13 @@ from src.models.risk_models import RiskCategory, Pattern
 logger = get_logger()
 
 
-class PositionBehaviorEvaluator(BaseRiskEvaluator):
+class TradingBehaviorEvaluator(BaseRiskEvaluator):
     """Evaluates trading position behaviors that may indicate cognitive biases"""
 
     def __init__(self):
         """Initialize the position behavior evaluator"""
         super().__init__(
-            evaluator_id="position_behavior_evaluator",
+            evaluator_id="trading_behavior_evaluator",
             description="Detects risky position management behaviors like doubling down"
         )
 

@@ -10,7 +10,6 @@ from src.risk.evaluators import (
     create_evaluators,
     BaseRiskEvaluator,
     UserLimitsEvaluator,
-    TimePatternEvaluator,
 )
 
 __all__ = [
@@ -18,5 +17,4 @@ __all__ = [
     'create_evaluators',
     'BaseRiskEvaluator',
     'UserLimitsEvaluator',
-    'TimePatternEvaluator',
-] 
+]

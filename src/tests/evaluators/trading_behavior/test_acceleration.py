@@ -9,14 +9,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from src.models.job_models import Job
-from src.risk.evaluators.position_behavior import PositionBehaviorEvaluator
+from src.risk.evaluators.trading_behavior import TradingBehaviorEvaluator
 from src.models.risk_models import RiskCategory, Pattern
 
 
-class TestPositionBehaviorEvaluator(unittest.TestCase):
+class TestAcceleration(unittest.TestCase):
     def setUp(self):
         """Set up test environment before each test method."""
-        self.evaluator = PositionBehaviorEvaluator()
+        self.evaluator = TradingBehaviorEvaluator()
         self.user_id = 12345
 
         # Use a fixed reference time for consistent testing
@@ -49,26 +49,19 @@ class TestPositionBehaviorEvaluator(unittest.TestCase):
         self.assertEqual(len(patterns), 0)
 
     def test_single_job(self):
-        """Test that evaluator doesn't detect acceleration with just one job."""
         job_history = {
             101: self._create_test_job(101, "BTC", 1000.0, 5.0)
         }
-
         patterns = self.evaluator.evaluate(self.user_id, job_history)
-
-        # Should not detect any patterns with just one job
         self.assertEqual(len(patterns), 0)
 
     def test_two_jobs_same_coin(self):
-        """Test that evaluator doesn't detect acceleration with only two jobs."""
         job_history = {
             101: self._create_test_job(101, "BTC", 1000.0, 5.0),
             102: self._create_test_job(102, "BTC", 2000.0, 3.0)
         }
 
         patterns = self.evaluator.evaluate(self.user_id, job_history)
-
-        # Should not detect acceleration with only two jobs
         self.assertEqual(len(patterns), 0)
 
     def test_position_size_acceleration(self):
@@ -85,11 +78,9 @@ class TestPositionBehaviorEvaluator(unittest.TestCase):
 
         patterns = self.evaluator.evaluate(self.user_id, job_history)
 
-        # Should detect one acceleration pattern
         self.assertEqual(len(patterns), 1)
         pattern = patterns[0]
 
-        # Verify pattern properties
         self.assertEqual(pattern.pattern_id, "position_acceleration")
         self.assertIn(101, pattern.job_id)
         self.assertIn(102, pattern.job_id)
@@ -97,11 +88,11 @@ class TestPositionBehaviorEvaluator(unittest.TestCase):
         self.assertGreaterEqual(pattern.confidence, 0.4)
 
         # Verify growth ratios (1st growth: 1.5, 2nd growth: 2.0)
-        #self.assertAlmostEqual(pattern.details["growth_ratios"][0], 1.5, places=2)
-        #self.assertAlmostEqual(pattern.details["growth_ratios"][1], 2.0, places=2)
+        self.assertAlmostEqual(pattern.details["growth_ratios"][0], 1.5, places=2)
+        self.assertAlmostEqual(pattern.details["growth_ratios"][1], 2.0, places=2)
         #
-        # # Verify acceleration factor (2.0 / 1.5 = 1.33)
-        #self.assertAlmostEqual(pattern.details["acceleration_factor"], 1.33, places=2)
+        # # Verify acceleration factor (1.33)
+        self.assertAlmostEqual(pattern.details["acceleration_factor"], 1.33, places=2)
 
     def test_position_size_acceleration_multiple_coins(self):
         """Test that acceleration is detected separately for each coin."""

@@ -67,9 +67,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         patterns.extend(self._check_single_job_limit(job, user_limits))
         patterns.extend(self._check_daily_trades_limit(job, job_history, user_limits))
-        patterns.extend(self._check_daily_volume_limit(job, job_history, user_limits))
-        patterns.extend(self._check_trade_cooldown(job, job_history, user_limits))
-        patterns.extend(self._check_concurrent_jobs(job, job_history, user_limits))
+        patterns.extend(self._check_daily_volume_limit(job_history, user_limits))
+        patterns.extend(self._check_trade_cooldown(job_history, user_limits))
+        patterns.extend(self._check_concurrent_jobs(job_history, user_limits))
         #
         # patterns.extend(self._check_consecutive_losses(job, job_history, user_limits))
         # patterns.extend(self._check_liquidity_threshold(job, user_limits))
@@ -142,7 +142,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         """Check if job amount exceeds single job limit"""
         patterns = []
 
-        # Safety check: verify limits is valid and has required values
         if not limits or not hasattr(limits, 'max_position_size') or not limits.max_position_size:
             logger.warning("Missing or invalid position size limit, skipping check")
             return patterns
@@ -157,7 +156,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             )
 
             patterns.append(Pattern(
-                pattern_id="single_job_amount_limit",
+                pattern_id="limit_single_job_amount",
                 job_id=[job.job_id],
                 message="Single job amount exceeded",
                 confidence=confidence,
@@ -195,9 +194,8 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             )
 
             patterns.append(Pattern(
-                pattern_id="daily_trade_limit",
-                job_id=[job.job_id],
-                message="Daily trades limit exceeded",
+                pattern_id="limit_daily_trades_count",
+                message="Daily limit of jobs was violated",
                 confidence=confidence,
                 category_weights={RiskCategory.OVERTRADING: 0.9,
                                   RiskCategory.FOMO: 0.1},
@@ -210,12 +208,11 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         return patterns
 
-    def _check_daily_volume_limit(self, job: Job, job_history: Dict[int, Job],
+    def _check_daily_volume_limit(self, job_history: Dict[int, Job],
                                   limits: UserLimits) -> List[Pattern]:
         """Check if daily volume exceeds limit"""
         patterns = []
 
-        # Safety check: verify limits is valid and has required values
         if not limits or not hasattr(limits, 'max_daily_volume') or not limits.max_daily_volume:
             logger.warning("Missing or invalid daily volume limit, skipping check")
             return patterns
@@ -233,8 +230,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             )
 
             patterns.append(Pattern(
-                pattern_id="daily_volume_exceeded",
-                job_id=[job.job_id],
+                pattern_id="limit_daily_volume",
                 message="Daily volume limit exceeded",
                 confidence=confidence,
                 category_weights={RiskCategory.OVERTRADING: 0.6,
@@ -251,74 +247,81 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
     def _check_trade_cooldown(self, job: Job, job_history: Dict[int, Job],
                               limits: UserLimits) -> List[Pattern]:
-        """Check if trade cooldown period is violated"""
+        """
+        Check if trade cooldown period is violated across all jobs in history.
+        This method analyzes the entire job history to find any instances where
+        jobs were created too close together, violating the cooldown period.
+
+        Args:
+            job_history: Dictionary of jobs (job_id -> Job)
+            limits: User limits configuration
+
+        Returns:
+            List of detected cooldown violation patterns
+        """
         patterns = []
 
-        # Safety check: verify limits is valid and has required values
         if not limits or not hasattr(limits, 'min_trade_interval_minutes') or not limits.min_trade_interval_minutes:
             logger.warning("Missing or invalid trade cooldown limit, skipping check")
             return patterns
 
-        # Current job's timestamp as datetime
-        current_time = job.created_at
-
-        most_recent_time = None
-
-        for history_job in job_history.values():
-            if history_job.job_id == job.job_id:
-                continue
-
-            # Get timestamp as datetime directly
-            job_dt = history_job.created_at
-
-            if most_recent_time is None or job_dt > most_recent_time:
-                most_recent_time = job_dt
-
-        # If no valid previous timestamp found, return early
-        if not most_recent_time:
-            return patterns
-
-        time_diff = current_time - most_recent_time
-        minutes_diff = time_diff.total_seconds() / 60
         cooldown_minutes = limits.min_trade_interval_minutes
+        jobs_list = list(job_history.values())
+        jobs_list.sort(key=lambda j: j.created_at)
 
-        if minutes_diff < cooldown_minutes:
-            violation_ratio = (cooldown_minutes - minutes_diff) / cooldown_minutes
-            confidence = self.calculate_dynamic_confidence(
-                violation_ratio,
-                base=0.5,
-                scaling=0.2,
-            )
+        for i in range(1, len(jobs_list)):
+            current_job = jobs_list[i]
+            previous_job = jobs_list[i - 1]
 
-            patterns.append(Pattern(
-                pattern_id="cooldown_limit",
-                job_id=[job.job_id],
-                message="Trade cooldown limit violated",
-                confidence=confidence,
-                category_weights={
-                    RiskCategory.OVERTRADING: 0.5,
-                    RiskCategory.FOMO: 0.5
-                },
-                details={
-                    "actual": minutes_diff,
-                    "limit": cooldown_minutes,
-                    "ratio": violation_ratio,
-                }
-            ))
+            time_diff = current_job.created_at - previous_job.created_at
+            minutes_diff = time_diff.total_seconds() / 60
+
+            if minutes_diff < cooldown_minutes:
+                violation_ratio = (cooldown_minutes - minutes_diff) / cooldown_minutes
+                confidence = self.calculate_dynamic_confidence(
+                    violation_ratio,
+                    base=0.3,
+                    scaling=0.2,
+                )
+                patterns.append(Pattern(
+                    pattern_id="limit_cooldown",
+                    job_id=[job.job_id],
+                    message="Trade cooldown limit violated",
+                    confidence=confidence,
+                    category_weights={
+                        RiskCategory.OVERTRADING: 0.5,
+                        RiskCategory.FOMO: 0.5
+                    },
+                    details={
+                        "actual": minutes_diff,
+                        "limit": cooldown_minutes,
+                        "ratio": violation_ratio,
+                    }
+                ))
 
         return patterns
 
     # todo later if needed - rewrite using timestamp searching retrospectively
-    def _check_concurrent_jobs(self, job: Job, job_history: Dict[int, Job],
+    def _check_concurrent_jobs(self, job_history: Dict[int, Job],
                                limits: UserLimits) -> List[Pattern]:
-        """Check if concurrent jobs limit is exceeded"""
+        """
+        Check if concurrent jobs limit is exceeded at any point in the job history.
+        This method analyzes active jobs to identify periods when too many jobs
+        were running simultaneously.
+
+        Args:
+            job_history: Dictionary of jobs (job_id -> Job)
+            limits: User limits configuration
+
+        Returns:
+            List of detected concurrent jobs violation patterns
+        """
         patterns = []
 
         if not limits or not hasattr(limits, 'max_concurrent_jobs') or not limits.max_concurrent_jobs:
             logger.warning("Missing or invalid concurrent jobs limit, skipping check")
             return patterns
 
-        # Count open jobs excluding the current one
         open_jobs = []
         for history_job in job_history.values():
             if history_job.is_active:
@@ -327,12 +330,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         open_jobs_count = len(open_jobs) - 1
         max_concurrent = limits.max_concurrent_jobs
 
-        # Check if limit exceeded
         if open_jobs_count > max_concurrent:
-            # Calculate confidence based on severity of violation
             violation_ratio = open_jobs_count / max_concurrent
 
-            # Use our dynamic confidence calculation for consistency
             confidence = self.calculate_dynamic_confidence(
                 violation_ratio,
                 base=0.4,
@@ -341,9 +341,8 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
             open_job_ids = [j.job_id for j in open_jobs]
 
-            # Create the pattern
             patterns.append(Pattern(
-                pattern_id="concurrent_jobs_limit",
+                pattern_id="limit_concurrent_jobs",
                 job_id=open_job_ids,
                 message=f"Concurrent jobs limit exceeded",
                 confidence=confidence,
@@ -360,94 +359,24 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         return patterns
 
-    def _check_allow_job(self, job: Job, job_history: Dict[int, Job], limits: UserLimits) -> List[Pattern]:
+    def _check_allow_force(self, job_history: Dict[int, Job], limits: UserLimits) -> List[Pattern]:
         patterns = []
-        if limits.allowDcaForce != 0 and job.discount_pct == 0:
+        if not limits or not hasattr(limits, 'allow_dca_force') or limits.allowDcaForce:
+            logger.warning("Missing or invalid concurrent jobs limit, skipping check")
+            return patterns
+
+        violated_jobs = []
+        for history_job in job_history.values():
+            if history_job.discount_pct == 0:
+                violated_jobs.append(history_job)
             patterns.append(Pattern(
-                pattern_id="cooldown_limit",
-                job_id=[job.job_id],
-                message="Trade cooldown limit violated",
+                pattern_id="limit_force_job",
+                job_id=[history_job.job_id],
+                message="Found a job violating force limit",
                 confidence=0.2,
                 category_weights={
                     RiskCategory.OVERTRADING: 0.5,
                     RiskCategory.FOMO: 0.5
-                },
-                details={
-                    "actual": minutes_diff,
-                    "limit": cooldown_minutes,
-                    "ratio": violation_ratio,
                 }
             ))
         return patterns
-
-    def _check_consecutive_losses(self, job: Job, job_history: Dict[int, Job],
-                                  limits: UserLimits) -> List[Dict[str, Any]]:
-        """Check if user has exceeded consecutive loss limit (SUNK_COST category)"""
-        evidence = []
-
-        # Only check for new jobs
-        if job.status != "Created":
-            return evidence
-
-        # Count recent consecutive losses
-        # This is just a skeleton implementation
-        consecutive_losses = 0  # In a real implementation, calculate from job_history
-        max_consecutive_losses = limits.maxConsecutiveLosses
-
-        if consecutive_losses >= max_consecutive_losses:
-            confidence = min(0.9, 0.5 + (consecutive_losses / max_consecutive_losses) * 0.1)
-
-            # Use the explicit category mapping - this is SUNK_COST, different from other limits
-            category = self.RISK_CATEGORY_MAPPINGS["max_consecutive_losses"].value
-
-            evidence.append({
-                "category_id": category,
-                "confidence": confidence,
-                "evaluator_id": self.evaluator_id,
-                "data": {
-                    "job_id": job.job_id,
-                    "consecutive_losses": consecutive_losses,
-                    "limit": max_consecutive_losses,
-                    "ratio": consecutive_losses / max_consecutive_losses,
-                    "reason": "Consecutive losses limit exceeded"
-                }
-            })
-
-        return evidence
-
-    def _check_liquidity_threshold(self, job: Job, limits: UserLimits) -> List[Dict[str, Any]]:
-        """Check if job exceeds liquidity threshold (FOMO category)"""
-        evidence = []
-
-        # Only check for new jobs 
-        if job.status != "Created":
-            return evidence
-
-        # This is a skeleton implementation - in a real system you'd get market data
-        market_liquidity = 1000000  # Example value, in a real impl get from market data
-        job_amount = job.amount
-        liquidity_threshold = limits.liquidityThreshold
-
-        # If job amount is high relative to market liquidity
-        if job_amount > liquidity_threshold:
-            liquidity_ratio = job_amount / market_liquidity
-            confidence = min(0.85, 0.4 + liquidity_ratio * 0.5)
-
-            # Use the explicit category mapping - this is FOMO, different from others
-            category = self.RISK_CATEGORY_MAPPINGS["liquidity_threshold"].value
-
-            evidence.append({
-                "category_id": category,
-                "confidence": confidence,
-                "evaluator_id": self.evaluator_id,
-                "data": {
-                    "job_id": job.job_id,
-                    "job_amount": job_amount,
-                    "market_liquidity": market_liquidity,
-                    "liquidity_threshold": liquidity_threshold,
-                    "liquidity_ratio": liquidity_ratio,
-                    "reason": "Job size exceeds liquidity threshold"
-                }
-            })
-
-        return evidence

@@ -70,25 +70,15 @@ class PatternCompositionEngine:
         """Initialize default composition rules for common biases."""
 
         self.rules.append(CompositePatternRule(
-            rule_id="rapid_overtrading",
-            pattern_ids=["daily_trade_limit", "cooldown_limit"],
+            rule_id="overtrading",
+            pattern_ids=["limit_daily_trades_count", "limit_cooldown", "limit_single_job_amount"],
             category=RiskCategory.OVERTRADING,
-            time_window_minutes=720,  # 12 hours
+            time_window_minutes=720,
             sequence_matters=False,
+            require_all_patterns=False,
             min_patterns_required=2,
             confidence_boost=0.15,
             message="Multiple overtrading indicators detected"
-        ))
-
-        self.rules.append(CompositePatternRule(
-            rule_id="volume_burst",
-            pattern_ids=["daily_volume_exceeded", "single_job_amount_limit"],
-            category=RiskCategory.OVERTRADING,
-            time_window_minutes=360,
-            sequence_matters=False,
-            min_patterns_required=2,
-            confidence_boost=0.2,
-            message="Trading volume burst detected"
         ))
 
         self.rules.append(CompositePatternRule(
@@ -97,22 +87,22 @@ class PatternCompositionEngine:
             category=RiskCategory.SUNK_COST,
             time_window_minutes=1440,  # 24h
             sequence_matters=True,
-            require_all_patterns=True,  # REQUIRE both patterns to be present
+            require_all_patterns=True,
             confidence_boost=0.25,
             message="Loss followed by increasing position size"
         ))
 
-        self.rules.append(CompositePatternRule(
-            rule_id="repeated_loss_chasing",
-            pattern_ids=["daily_loss_limit", "trade_frequency_increase", "increased_risk_taking"],
-            category=RiskCategory.SUNK_COST,
-            time_window_minutes=1440,
-            sequence_matters=True,
-            min_patterns_required=2,  # Only need 2 out of 3 patterns
-            require_all_patterns=False,
-            confidence_boost=0.2,
-            message="Daily loss followed by increased trading behavior"
-        ))
+        # self.rules.append(CompositePatternRule(
+        #     rule_id="repeated_loss_chasing",
+        #     pattern_ids=["daily_loss_limit", "trade_frequency_increase", "increased_risk_taking"],
+        #     category=RiskCategory.SUNK_COST,
+        #     time_window_minutes=1440,
+        #     sequence_matters=True,
+        #     min_patterns_required=2,  # Only need 2 out of 3 patterns
+        #     require_all_patterns=False,
+        #     confidence_boost=0.2,
+        #     message="Daily loss followed by increased trading behavior"
+        # ))
 
     def add_rule(self, rule: CompositePatternRule):
         """Add a new composition rule to the engine."""

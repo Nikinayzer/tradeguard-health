@@ -286,7 +286,7 @@ class TestPatternCompositionEngine(unittest.TestCase):
         """Test that job IDs from source patterns are combined in composite pattern."""
         patterns = [
             Pattern(
-                pattern_id="daily_trade_limit",
+                pattern_id="limit_daily_trade",
                 job_id=[self.job_id_1, self.job_id_2],
                 message="Daily trade limit exceeded for multiple jobs",
                 confidence=0.6,
@@ -294,7 +294,7 @@ class TestPatternCompositionEngine(unittest.TestCase):
                 start_time=self.current_time - timedelta(hours=1)
             ),
             Pattern(
-                pattern_id="cooldown_limit",
+                pattern_id="limit_cooldown",
                 job_id=[self.job_id_2, self.job_id_3],
                 message="Cooldown period violated",
                 confidence=0.7,
@@ -317,7 +317,7 @@ class TestPatternCompositionEngine(unittest.TestCase):
         # Create patterns that overlap in time
         patterns = [
             Pattern(
-                pattern_id="daily_trade_limit",
+                pattern_id="limit__daily_trade_count",
                 job_id=[self.job_id_1],
                 message="Trading limit exceeded with duration",
                 confidence=0.6,
@@ -326,7 +326,7 @@ class TestPatternCompositionEngine(unittest.TestCase):
                 end_time=self.current_time - timedelta(hours=1)  # 2-hour duration
             ),
             Pattern(
-                pattern_id="cooldown_limit",
+                pattern_id="limit_cooldown",
                 job_id=[self.job_id_2],
                 message="Cooldown violation during active trading",
                 confidence=0.7,

@@ -43,6 +43,7 @@ dashboard_state = {
     "dca_jobs": {},
     "liq_jobs": {},
     "job_to_user_map": {},
+    "positions_state": {},
     "last_update": time.time(),
     "startup_time": datetime.now().timestamp()
 }
@@ -112,29 +113,30 @@ DASHBOARD_HTML = """
             fetch('/api/state')
                 .then(response => response.json())
                 .then(data => {
-                    // Store the data for modal usage
-                    currentData = data;
+                    // Update timestamp
+                    const lastUpdate = new Date(data.last_update * 1000);
+                    document.getElementById('lastUpdate').textContent = lastUpdate.toLocaleString();
                     
-                    document.getElementById('summaryData').innerHTML = renderSummary(data);
-                    document.getElementById('statusData').innerHTML = renderStatusTable(data);
-                    document.getElementById('jobsData').innerHTML = renderRecentJobs(data);
-                    document.getElementById('usersData').innerHTML = renderActiveUsers(data);
+                    // Render all sections
+                    renderSummary(data);
+                    renderJobsByStatus(data);
+                    renderRecentJobs(data);
+                    renderUserStats(data);
                     
-                    // If a user is selected, update user context view
-                    if (selectedUserId && document.getElementById('userContextData')) {
-                        document.getElementById('userContextData').innerHTML = renderUserContext(selectedUserId);
-                        document.getElementById('userContextTitle').innerText = `User ${selectedUserId} Context`;
+                    // Render positions if we have position data
+                    if (data.positions_state) {
+                        renderPositions(data.positions_state);
                     }
                     
-                    // Update last refresh time
-                    const now = new Date();
-                    document.getElementById('lastUpdate').innerText = now.toLocaleTimeString();
-                    
-                    // Add click listeners for job details
-                    addJobDetailListeners();
-                    
-                    // Add click listeners for user selection
-                    addUserSelectionListeners();
+                    // Update position count in overview
+                    const totalPositionsElement = document.getElementById('total-positions');
+                    if (totalPositionsElement && data.positions_state) {
+                        let totalPositions = 0;
+                        for (const userId in data.positions_state) {
+                            totalPositions += Object.keys(data.positions_state[userId]).length;
+                        }
+                        totalPositionsElement.textContent = totalPositions;
+                    }
                 })
                 .catch(error => console.error('Error fetching data:', error));
         }
@@ -743,20 +745,125 @@ DASHBOARD_HTML = """
             return html;
         }
         
+        // Function to switch tabs
+        function showTab(tabId) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+                tab.style.display = 'none';
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabId).style.display = 'block';
+            document.getElementById(tabId).classList.add('active');
+            document.querySelector(`.tab[onclick="showTab('${tabId}')"]`).classList.add('active');
+        }
+        
+        // Render positions table for each user
+        function renderPositions(positionsState) {
+            const container = document.getElementById('positions-container');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            let totalPositions = 0;
+            
+            for (const userId in positionsState) {
+                const positions = positionsState[userId];
+                const positionCount = Object.keys(positions).length;
+                totalPositions += positionCount;
+                
+                // Skip users with no positions
+                if (positionCount === 0) continue;
+                
+                const userSection = document.createElement('div');
+                userSection.className = 'bg-white p-4 rounded shadow mb-4';
+                userSection.innerHTML = `
+                    <h3 class="text-lg font-bold mb-2">User ID: ${userId} (${positionCount} positions)</h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full">
+                            <thead>
+                                <tr class="bg-gray-100">
+                                    <th class="px-4 py-2">Venue</th>
+                                    <th class="px-4 py-2">Symbol</th>
+                                    <th class="px-4 py-2">Side</th>
+                                    <th class="px-4 py-2">Quantity</th>
+                                    <th class="px-4 py-2">USDT</th>
+                                    <th class="px-4 py-2">Entry Price</th>
+                                    <th class="px-4 py-2">Mark Price</th>
+                                    <th class="px-4 py-2">Leverage</th>
+                                    <th class="px-4 py-2">Unrealized PNL</th>
+                                    <th class="px-4 py-2">Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${Object.values(positions).map(pos => {
+                                    return `
+                                        <tr class="hover:bg-gray-50">
+                                            <td class="border px-4 py-2">${pos.venue || ''}</td>
+                                            <td class="border px-4 py-2">${pos.symbol || ''}</td>
+                                            <td class="border px-4 py-2">${pos.side || ''}</td>
+                                            <td class="border px-4 py-2">${pos.qty || 0}</td>
+                                            <td class="border px-4 py-2">${pos.usdt_amt || 0}</td>
+                                            <td class="border px-4 py-2">${pos.entry_price || 0}</td>
+                                            <td class="border px-4 py-2">${pos.mark_price || 0}</td>
+                                            <td class="border px-4 py-2">${pos.leverage || 1}x</td>
+                                            <td class="border px-4 py-2">${formatPnl(pos.unrealized_pnl)}</td>
+                                            <td class="border px-4 py-2">${formatDate(pos.timestamp || '')}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+                container.appendChild(userSection);
+            }
+            
+            // Update total positions count in overview tab
+            const totalPositionsElement = document.getElementById('total-positions');
+            if (totalPositionsElement) {
+                totalPositionsElement.textContent = totalPositions;
+            }
+        }
+        
+        // Format PNL with color coding
+        function formatPnl(pnl) {
+            if (pnl === undefined || pnl === null) return '';
+            
+            const numPnl = parseFloat(pnl);
+            let pnlClass = '';
+            
+            if (numPnl < 0) {
+                pnlClass = 'negative-pnl';
+            } else if (numPnl > 0) {
+                pnlClass = 'positive-pnl';
+            }
+            
+            return `<span class="${pnlClass}">${numPnl.toFixed(2)}</span>`;
+        }
+        
         // Initialize when the page loads
         document.addEventListener('DOMContentLoaded', function() {
             refreshData();
             setInterval(refreshData, 2000);
             
-            // Setup modal close button
-            document.getElementById('closeJobDetailModal').addEventListener('click', closeJobDetailModal);
-            
-            // Close modal if user clicks outside
-            window.addEventListener('click', function(event) {
-                const modal = document.getElementById('jobDetailModal');
-                if (event.target === modal) {
-                    closeJobDetailModal();
+            // Initialize tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                if (!tab.classList.contains('active')) {
+                    tab.style.display = 'none';
                 }
+            });
+            
+            // Add click handlers for tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const tabId = this.getAttribute('onclick').match(/'([^']+)'/)[1];
+                    showTab(tabId);
+                });
             });
         });
     </script>
@@ -778,25 +885,55 @@ DASHBOARD_HTML = """
             </div>
         </header>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="bg-white p-4 rounded shadow">
-                <h2 class="text-xl font-bold mb-4">Summary</h2>
-                <div id="summaryData">Loading...</div>
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('overview')">Overview</div>
+            <div class="tab" onclick="showTab('jobs')">Jobs</div>
+            <div class="tab" onclick="showTab('positions')">Positions</div>
+        </div>
+        
+        <div id="overview" class="tab-content active">
+            <div class="card">
+                <h2>System Overview</h2>
+                <div class="overview-stats">
+                    <div class="stat-card">
+                        <h3>Total Users</h3>
+                        <p id="total-users">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Jobs</h3>
+                        <p id="total-jobs">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Active Jobs</h3>
+                        <p id="active-jobs">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>DCA Jobs</h3>
+                        <p id="dca-jobs">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>LIQ Jobs</h3>
+                        <p id="liq-jobs">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Positions</h3>
+                        <p id="total-positions">0</p>
+                    </div>
+                </div>
             </div>
-            
-            <div class="bg-white p-4 rounded shadow">
-                <h2 class="text-xl font-bold mb-4">Jobs by Status</h2>
-                <div id="statusData">Loading...</div>
+        </div>
+        
+        <div id="jobs" class="tab-content">
+            <div class="card">
+                <h2>Jobs By User</h2>
+                <div id="jobs-container"></div>
             </div>
-            
-            <div class="bg-white p-4 rounded shadow col-span-1 md:col-span-2">
-                <h2 class="text-xl font-bold mb-4">Recent Jobs</h2>
-                <div id="jobsData">Loading...</div>
-            </div>
-            
-            <div class="bg-white p-4 rounded shadow col-span-1 md:col-span-2">
-                <h2 class="text-xl font-bold mb-4">Users with Active Jobs</h2>
-                <div id="usersData">Loading...</div>
+        </div>
+        
+        <div id="positions" class="tab-content">
+            <div class="card">
+                <h2>Positions By User</h2>
+                <div id="positions-container"></div>
             </div>
         </div>
         
@@ -848,7 +985,7 @@ class WebDashboard:
         self.server_thread = None
         self.running = False
     
-    def set_state_data(self, jobs_state, dca_jobs, liq_jobs, job_to_user_map):
+    def set_state_data(self, jobs_state, dca_jobs, liq_jobs, job_to_user_map, positions_state=None):
         """
         Update the dashboard with current state data.
         
@@ -857,6 +994,7 @@ class WebDashboard:
             dca_jobs: Dictionary mapping user_id to dictionary of job_id -> job_data for DCA jobs
             liq_jobs: Dictionary mapping user_id to dictionary of job_id -> job_data for LIQ jobs
             job_to_user_map: Mapping of job_id to user_id
+            positions_state: Dictionary mapping user_id to dictionary of position_key -> position_data
         """
         global dashboard_state
 
@@ -864,6 +1002,11 @@ class WebDashboard:
         dashboard_state["dca_jobs"] = self._make_serializable_copy(dca_jobs)
         dashboard_state["liq_jobs"] = self._make_serializable_copy(liq_jobs)
         dashboard_state["job_to_user_map"] = dict(job_to_user_map)
+        
+        if positions_state is not None:
+            dashboard_state["positions_state"] = self._make_serializable_copy(positions_state)
+            self._format_timestamps(dashboard_state["positions_state"])
+            
         dashboard_state["last_update"] = time.time()
 
         self._format_timestamps(dashboard_state["jobs_state"])
@@ -872,14 +1015,14 @@ class WebDashboard:
     
     def _format_timestamps(self, state_dict):
         """Format all timestamps in the state dictionary for better display."""
-        for user_id, jobs in state_dict.items():
-            for job_id, job in jobs.items():
-                if 'timestamp' in job and job['timestamp']:
+        for user_id, items in state_dict.items():
+            for item_id, item in items.items():
+                if 'timestamp' in item and item['timestamp']:
                     try:
                         # Ensure it's ISO format
-                        dt = DateTimeUtils.parse_timestamp(job['timestamp'])
+                        dt = DateTimeUtils.parse_timestamp(item['timestamp'])
                         if dt:
-                            job['timestamp'] = dt.isoformat()
+                            item['timestamp'] = dt.isoformat()
                     except Exception:
                         # Keep original if parsing fails
                         pass
@@ -887,23 +1030,24 @@ class WebDashboard:
     def _make_serializable_copy(self, nested_dict):
         """Create a serializable copy of the state dictionaries."""
         result = {}
-        for user_id, jobs in nested_dict.items():
+        for user_id, items in nested_dict.items():
             result[user_id] = {}
-            for job_id, job in jobs.items():
+            for item_id, item in items.items():
                 # Ensure all values are JSON serializable
-                result[user_id][job_id] = dict(job)
+                result[user_id][item_id] = dict(item)
         return result
     
     def start_server(self):
         """Start the web server in the current thread."""
-        logger.info("Starting web dashboard at http://localhost:8081")
-        uvicorn.run(app, host="0.0.0.0", port=8081)
+        logger.info(f"Starting web dashboard at http://{Config.DASHBOARD_HOST}:{Config.DASHBOARD_PORT}")
+        uvicorn.run(app, host=Config.DASHBOARD_HOST, port=Config.DASHBOARD_PORT)
     
     def start_server_in_thread(self):
         """Start the web server in a background thread."""
-        logger.info("Starting web dashboard in background thread at http://0.0.0.0:8081")
+        logger.info(f"Starting web dashboard in background thread at http://{Config.DASHBOARD_HOST}:{Config.DASHBOARD_PORT}")
         self.server_thread = threading.Thread(target=self.start_server, daemon=True)
         self.server_thread.start()
+        return self.server_thread
 
     def stop_server(self):
         """Stop the web server."""
