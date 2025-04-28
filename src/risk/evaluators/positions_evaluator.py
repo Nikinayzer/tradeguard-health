@@ -98,10 +98,11 @@ class PositionEvaluator(BaseRiskEvaluator):
                     venue = current_position.venue
                     symbol = current_position.symbol
 
-                # Calculate confidence based on how much the threshold is exceeded
-                # (e.g., 1.5x threshold = higher confidence)
-                threshold_ratio = holding_days / self.LONG_HOLDING_DAYS_THRESHOLD
-                confidence = min(0.8, 0.4 + (threshold_ratio - 1) * 0.1)
+
+                violation_ratio = holding_days / self.LONG_HOLDING_DAYS_THRESHOLD
+                confidence = self.calculate_dynamic_confidence(
+                    violation_ratio,
+                )
 
                 patterns.append(Pattern(
                     pattern_id="long_holding_time",
@@ -164,8 +165,6 @@ class PositionEvaluator(BaseRiskEvaluator):
 
             confidence = self.calculate_dynamic_confidence(
                 violation_ratio,
-                base=0.3,
-                scaling=0.2
             )
 
             try:
