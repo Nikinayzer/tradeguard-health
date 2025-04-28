@@ -226,7 +226,7 @@ class KafkaHandler(Generic[T]):
 
                 # Log stats every minute
                 if (current_time - last_log_time).total_seconds() > 60:
-                    logger.info(f"Kafka consumer stats: {message_count} messages processed, {error_count} errors")
+                    logger.info(f"Kafka {self.topic} stats: {message_count} messages processed, {error_count} errors")
                     last_log_time = current_time
                     message_count = 0  # Reset counters
                     error_count = 0

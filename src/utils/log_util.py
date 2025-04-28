@@ -1,7 +1,8 @@
 import logging.config
 import os
-from src.utils.paths import get_log_file_path
+
 from src.config.config import Config
+from src.utils.paths import get_log_file_path
 
 BASE_LOGGER_PREFIX = 'tradeguard.health'
 log_file = get_log_file_path()
@@ -11,6 +12,7 @@ global_level = Config.RS_LOG
 kafka_level = global_level if (global_level == "DEBUG") else Config.KAFKA_LOG
 job_processor_level = global_level if (global_level == "DEBUG") else Config.RS_LOG_JOB_PROCESSOR
 
+# Create color formatter
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -18,11 +20,23 @@ LOGGING_CONFIG = {
         "standard": {
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         },
+        "colored": {
+            "()": "colorlog.ColoredFormatter",
+            "format": "%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "log_colors": {
+                "DEBUG": "cyan",
+                "INFO": "green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "red,bg_white",
+            },
+            "reset": True,
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "standard",
+            "formatter": "colored",
         },
         "file": {
             "class": "logging.FileHandler",
@@ -52,6 +66,14 @@ LOGGING_CONFIG = {
 
 def setup_logging() -> None:
     """Set up logging using dictConfig."""
+    # Initialize colorama if on Windows for better console color support
+    try:
+        import colorama
+        colorama.init()
+    except ImportError:
+        # colorama not installed, colors might not work well on Windows
+        pass
+        
     logging.config.dictConfig(LOGGING_CONFIG)
 
 

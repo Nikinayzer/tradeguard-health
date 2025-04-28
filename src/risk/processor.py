@@ -66,7 +66,7 @@ class RiskProcessor:
         self.pattern_composition_engine = PatternCompositionEngine()
 
         self.presets = {  # todo make normal presets
-            "limits_only": ["user_limits"],
+            "limits_only": ["user_limits", "positions_evaluator"],
             "overtrading": ["overtrading_evaluator", "time_pattern_evaluator"],
             "daily_risk": ["portfolio_exposure_evaluator", "position_size_evaluator"],
             "all": [e.evaluator_id for e in self.evaluators.values()]

@@ -151,8 +151,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
             confidence = self.calculate_dynamic_confidence(
                 violation_rate,
-                base=0.3,
-                scaling=0.2,
             )
 
             patterns.append(Pattern(
@@ -189,8 +187,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
             confidence = self.calculate_dynamic_confidence(
                 violation_rate,
-                base=0.3,
-                scaling=0.2,
             )
 
             patterns.append(Pattern(
@@ -225,8 +221,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             violation_rate = total_volume / limits.max_daily_volume
             confidence = self.calculate_dynamic_confidence(
                 violation_rate,
-                base=0.3,
-                scaling=0.2,
             )
 
             patterns.append(Pattern(
@@ -280,8 +274,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 violation_ratio = (cooldown_minutes - minutes_diff) / cooldown_minutes
                 confidence = self.calculate_dynamic_confidence(
                     violation_ratio,
-                    base=0.3,
-                    scaling=0.2,
                 )
                 patterns.append(Pattern(
                     pattern_id="limit_cooldown",
@@ -335,8 +327,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
             confidence = self.calculate_dynamic_confidence(
                 violation_ratio,
-                base=0.4,
-                scaling=0.25,
             )
 
             open_job_ids = [j.job_id for j in open_jobs]

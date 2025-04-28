@@ -81,25 +81,24 @@ class BaseRiskEvaluator:
 
         return decayed_confidence
 
-    def calculate_dynamic_confidence(self,
-                                     violation_ratio: float,
-                                     base: float = 0.6,
-                                     scaling: float = 0.1,
-                                     boost: Optional[float] = 0.0,
-                                     ) -> float:
+    @classmethod
+    def calculate_dynamic_confidence(cls, violation_ratio: float, max_confidence: float = 1.0) -> float:
         """
-        Calculates confidence based on a violation ratio using a log scale.
+        Calculates confidence based purely on the violation ratio using a logarithmic scale.
+        The confidence reaches 1.0 when violation_ratio equals 2.
 
         Args:
             violation_ratio: How much the threshold was exceeded (e.g. 1.5 = 50% over).
-            base: Base confidence to start from.
-            scaling: How fast confidence grows.
-            boost: Optional extra boost from context (e.g. recent losses)
+            max_confidence: The maximum confidence, usually 1.0.
 
         Returns:
-            Float confidence between 0 and max_confidence
+            Float confidence between 0 and max_confidence.
         """
         # Ensure violation_ratio is at least 1 to avoid math domain error
         effective_ratio = max(1.0, violation_ratio)
-        adjusted = round(base + scaling * math.log1p((effective_ratio - 1) * 10) + boost, 3)
-        return min(1.0, adjusted)
+
+        adjusted = math.log1p((effective_ratio - 1) * 10)
+        # Normalize
+        normalized_confidence = min(max_confidence, adjusted / math.log1p(10))
+
+        return normalized_confidence

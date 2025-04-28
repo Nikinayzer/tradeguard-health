@@ -22,13 +22,13 @@ class Config:
 
     # API
     BFF_BASE_URL: str = os.getenv('BFF_BASE_URL', 'http://localhost:8080/api')
-    API_USER_LIMITS_PATH: str = '/users/{user_id}/limits'
+    API_USER_LIMITS_PATH: str = '/internal/users/{user_id}/limits'
 
     # Web Dashboard
     ENABLE_WEB_DASHBOARD: bool = os.getenv('ENABLE_WEB_DASHBOARD', 'true').lower() in ('true', 'yes', '1')
-    DASHBOARD_REFRESH_RATE: int = int(os.getenv('DASHBOARD_REFRESH_RATE', '2'))
-    DASHBOARD_HOST: str = os.getenv('DASHBOARD_HOST', '0.0.0.0')
-    DASHBOARD_PORT: int = int(os.getenv('DASHBOARD_PORT', '8081'))
+    DASHBOARD_REFRESH_RATE: int = int(os.getenv('DASHBOARD_REFRESH_RATE', '1'))
+    DASHBOARD_HOST: str = os.getenv('DASHBOARD_HOST', '127.0.0.1')
+    DASHBOARD_PORT: int = int(os.getenv('DASHBOARD_PORT', '42069'))
 
     @classmethod
     def get_user_limits_url(cls, user_id: int) -> str:

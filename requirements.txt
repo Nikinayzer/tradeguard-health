@@ -5,4 +5,5 @@ six==1.16.0
 confluent-kafka==2.8.2
 rich==13.7.0
 fastapi==0.109.2
-uvicorn==0.27.1 
+uvicorn==0.27.1
+redis==5.2.1
