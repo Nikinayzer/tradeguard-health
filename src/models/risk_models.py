@@ -11,8 +11,7 @@ logger = log_util.get_logger()
 
 class RiskCategory(str, Enum):
     """Enumeration of risk categories"""
-    OVERTRADING = "overtrading"
-    # OVERCONFIDENCE = "overconfidence"
+    OVERCONFIDENCE = "overconfidence"
     FOMO = "fomo"
     LOSS_BEHAVIOR = "loss_behavior"  # loss-aversion + loss-seeking
     SUNK_COST = "sunk_cost"
@@ -27,18 +26,19 @@ class RiskLevel(str, Enum):
     CRITICAL = "critical"  # > 90
 
 
-class Pattern(BaseModel):
-    """Model for individual pattern."""
+class BasePattern(BaseModel):
+    """Base model for a pattern."""
     pattern_id: str
     job_id: Optional[List[int]] = None
+    position_id: Optional[int] = None
     message: str
-    confidence: float
-    category_weights: Dict[RiskCategory, float]
+    category_weights: Optional[Dict[RiskCategory, float]] = None
     details: Optional[Dict[str, Any]] = None
     start_time: Optional[datetime] = Field(default_factory=datetime.now)
-    end_time: Optional[datetime] = None  # point-in-time pattern
-    consumed: bool = False  # Flag to track if pattern is used in a composite pattern
-    is_composite: bool = False  # Flag to identify composite patterns
+    end_time: Optional[datetime] = None
+#   consumed: bool = False
+    show_if_not_consumed: bool = True  # some atomic patterns should not be shown if not consumed
+    is_composite: bool = False  # leave?
 
     @property
     def timestamp(self) -> datetime:
@@ -55,8 +55,7 @@ class Pattern(BaseModel):
     @computed_field
     @property
     def internal_id(self) -> str:
-        """Generate a shorter, cleaner unique ID for pattern tracking."""
-        # Create a hash based on pattern_id, timestamp, and job_id
+        """Generate a shorter, cleaner unique ID hash for pattern tracking."""
         data = f"{self.pattern_id}_{self.timestamp.isoformat() if self.timestamp else ''}"
         if self.job_id:
             data += f"_{'_'.join(map(str, self.job_id))}"
@@ -64,19 +63,35 @@ class Pattern(BaseModel):
         # Create a short hash (first 8 chars of md5)
         hash_obj = hashlib.md5(data.encode())
         short_hash = hash_obj.hexdigest()[:8]
-
         # Format: pattern_type:short_hash (e.g., "daily_limit:a1b2c3d4")
         pattern_type = self.pattern_id.split('_')[0] if '_' in self.pattern_id else self.pattern_id
         return f"{pattern_type}:{short_hash}"
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Pattern":
+    def from_dict(cls, data: Dict[str, Any]) -> "BasePattern":
         """Create a Trigger from a dictionary."""
         return cls(**data)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the trigger to a dictionary."""
         return self.model_dump()
+
+
+class AtomicPattern(BasePattern):
+    """Model for atomic patterns."""
+    severity: float
+    consumed: bool = False
+
+    @property
+    def confidence(self) -> float:
+        """Legacy compatibility property."""
+        return self.severity
+
+
+class CompositePattern(BasePattern):
+    """Model for composite patterns."""
+    confidence: float
+    component_patterns: List[str]
 
 
 class RiskRepost(BaseModel):
@@ -88,8 +103,8 @@ class RiskRepost(BaseModel):
     top_risk_confidence: float = Field(ge=0.0, le=100.0)
     top_risk_type: RiskCategory
     category_scores: Dict[RiskCategory, float]
-    patterns: List[Pattern]
-    composite_patterns: List[Pattern]
+    patterns: List[AtomicPattern]
+    composite_patterns: List[CompositePattern]
     decay_params: Dict[str, Any]
     metadata: Dict[str, Any] = Field(default_factory=dict)  # Additional report metadata
     timestamp: datetime = Field(default_factory=datetime.now)

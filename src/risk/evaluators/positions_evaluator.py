@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta, timezone
 
 from src.models import Job, Position
-from src.models.risk_models import RiskCategory, Pattern
+from src.models.risk_models import RiskCategory, AtomicPattern
 from src.models.position_models import PositionUpdateType
 from src.risk.evaluators.base import BaseRiskEvaluator
 from src.state.state_manager import StateManager
@@ -35,14 +35,14 @@ class PositionEvaluator(BaseRiskEvaluator):
         self.EARLY_PROFIT_THRESHOLD = 0.05
         self.LONG_HOLDING_DAYS_THRESHOLD = 7
 
-    def evaluate(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[Pattern]:
+    def evaluate(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[AtomicPattern]:
         patterns = []
         patterns.extend(self.check_early_profit_exit(user_id, position_histories))
         patterns.extend(self.check_unrealized_pnl(user_id, position_histories))
         patterns.extend(self.check_long_holding_time(user_id, position_histories))
         return patterns
 
-    def check_long_holding_time(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[Pattern]:
+    def check_long_holding_time(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[AtomicPattern]:
         """
         Check for positions held for too long based on first entry timestamp.
         
@@ -98,20 +98,16 @@ class PositionEvaluator(BaseRiskEvaluator):
                     venue = current_position.venue
                     symbol = current_position.symbol
 
-
                 violation_ratio = holding_days / self.LONG_HOLDING_DAYS_THRESHOLD
-                confidence = self.calculate_dynamic_confidence(
+                severity = self.calculate_dynamic_severity(
                     violation_ratio,
                 )
 
-                patterns.append(Pattern(
+                patterns.append(AtomicPattern(
                     pattern_id="long_holding_time",
                     user_id=user_id,
                     message=f"Position on {symbol} held for {holding_days:.1f} days",
-                    confidence=confidence,
-                    category_weights={
-                        RiskCategory.SUNK_COST: 0.6
-                    },
+                    severity=severity,
                     details={
                         "position_key": position_key,
                         "symbol": symbol,
@@ -126,7 +122,7 @@ class PositionEvaluator(BaseRiskEvaluator):
 
         return patterns
 
-    def check_unrealized_pnl(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[Pattern]:
+    def check_unrealized_pnl(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[AtomicPattern]:
         """
         Check positions for negative unrealized PnL exceeding thresholds.
         
@@ -163,7 +159,7 @@ class PositionEvaluator(BaseRiskEvaluator):
             # -15% is 1.5x worse than -10%
             violation_ratio = abs(pnl_percentage) / 10.0
 
-            confidence = self.calculate_dynamic_confidence(
+            severity = self.calculate_dynamic_severity(
                 violation_ratio,
             )
 
@@ -174,15 +170,11 @@ class PositionEvaluator(BaseRiskEvaluator):
                 venue = position.venue
                 symbol = position.symbol
 
-            patterns.append(Pattern(
+            patterns.append(AtomicPattern(
                 pattern_id="position_unrealized_pnl_threshold",
                 user_id=user_id,
                 message=f"Position has significant unrealized loss ({pnl_percentage:.2f}%)",
-                confidence=confidence,
-                category_weights={
-                    RiskCategory.LOSS_BEHAVIOR: 0.7,
-                    RiskCategory.SUNK_COST: 0.3
-                },
+                severity=severity,
                 details={
                     "position_key": position_key,
                     "symbol": symbol,
@@ -196,7 +188,7 @@ class PositionEvaluator(BaseRiskEvaluator):
 
         return patterns
 
-    def check_early_profit_exit(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[Pattern]:
+    def check_early_profit_exit(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[AtomicPattern]:
         """
         Identify instances where a trader exits profitable positions with small gains.
         Returns individual atomic patterns for each early exit instance.
@@ -237,14 +229,11 @@ class PositionEvaluator(BaseRiskEvaluator):
                     continue
 
                 if 0 < profit_pct <= self.EARLY_PROFIT_THRESHOLD:
-                    patterns.append(Pattern(
+                    patterns.append(AtomicPattern(
                         pattern_id="early_profit_exit",
                         user_id=user_id,
                         message=f"Early profit exit on {symbol} ({profit_pct:.2%})",
-                        confidence=0.5,
-                        category_weights={
-                            RiskCategory.LOSS_BEHAVIOR: 1.0,
-                        },
+                        severity=0.5,
                         details={
                             "position_key": position_key,
                             "symbol": symbol,

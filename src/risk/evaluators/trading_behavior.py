@@ -13,7 +13,7 @@ from collections import defaultdict
 from src.models import Job
 from src.risk.evaluators.base import BaseRiskEvaluator
 from src.utils.log_util import get_logger
-from src.models.risk_models import RiskCategory, Pattern
+from src.models.risk_models import RiskCategory, AtomicPattern
 
 logger = get_logger()
 
@@ -28,7 +28,7 @@ class TradingBehaviorEvaluator(BaseRiskEvaluator):
             description="Detects risky position management behaviors like doubling down"
         )
 
-    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[Pattern]:
+    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[AtomicPattern]:
         """
         Evaluate position behaviors across the entire job history.
         
@@ -46,13 +46,12 @@ class TradingBehaviorEvaluator(BaseRiskEvaluator):
 
         patterns = []
 
-        # Check for various position behaviors across the entire history
         patterns.extend(self._check_position_size_acceleration(job_history))
 
         return patterns
 
     # todo decide if limited timeframe is needed
-    def _check_position_size_acceleration(self, job_history: Dict[int, Job]) -> List[Pattern]:
+    def _check_position_size_acceleration(self, job_history: Dict[int, Job]) -> List[AtomicPattern]:
         """
         Detect rapid acceleration in position sizes over time.
         
@@ -92,32 +91,22 @@ class TradingBehaviorEvaluator(BaseRiskEvaluator):
                 job2 = jobs[i - 1]
                 job1 = jobs[i - 2]
 
-                # Calculate growth ratios
                 ratio1 = job2.amount / job1.amount if job1.amount > 0 else 0
                 ratio2 = job3.amount / job2.amount if job2.amount > 0 else 0
 
-                # Check for accelerating growth (second ratio larger than first)
                 if 1.1 < ratio1 < ratio2 and ratio2 >= 1.3:
-                    # Calculate overall growth
                     total_growth = job3.amount / job1.amount
 
-                    # Calculate confidence based on acceleration
                     acceleration_factor = ratio2 / ratio1
-                    confidence = self.calculate_dynamic_confidence(
-                        acceleration_factor - 1,
-                        base=0.4,
-                        scaling=0.2,
+                    severity = self.calculate_dynamic_severity(
+                        acceleration_factor,
                     )
 
-                    patterns.append(Pattern(
+                    patterns.append(AtomicPattern(
                         pattern_id="position_acceleration",
                         job_id=[job1.id, job2.id, job3.id],
                         message=f"Accelerating position sizes detected in {coin}",
-                        confidence=confidence,
-                        category_weights={
-                            RiskCategory.OVERTRADING: 0.6,
-                            RiskCategory.FOMO: 0.4
-                        },
+                        severity=severity,
                         details={
                             "coin": coin,
                             "job_amounts": [job1.amount, job2.amount, job3.amount],

@@ -20,7 +20,7 @@ from src.risk.evaluators.base import BaseRiskEvaluator
 from src.utils.datetime_utils import DateTimeUtils
 from src.utils.log_util import get_logger
 from src.models.user_models import UserLimits
-from src.models.risk_models import RiskCategory, Pattern
+from src.models.risk_models import RiskCategory, AtomicPattern
 from src.config.config import Config
 
 logger = get_logger()
@@ -40,7 +40,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         self.cache_ttl_seconds = 1
         self.cache_timestamps: Dict[int, datetime] = {}
 
-    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[Pattern]:
+    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[AtomicPattern]:
         """
         Evaluate user limits violations.
         
@@ -138,7 +138,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             return None
 
     # todo refactor to work with all jobs
-    def _check_single_job_limit(self, job: Job, limits: UserLimits) -> List[Pattern]:
+    def _check_single_job_limit(self, job: Job, limits: UserLimits) -> List[AtomicPattern]:
         """Check if job amount exceeds single job limit"""
         patterns = []
 
@@ -149,18 +149,15 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         if job.amount > limits.max_position_size > 0:
             violation_rate = job.amount / limits.max_position_size
 
-            confidence = self.calculate_dynamic_confidence(
+            severity = self.calculate_dynamic_severity(
                 violation_rate,
             )
 
-            patterns.append(Pattern(
+            patterns.append(AtomicPattern(
                 pattern_id="limit_single_job_amount",
                 job_id=[job.job_id],
                 message="Single job amount exceeded",
-                confidence=confidence,
-                category_weights={RiskCategory.FOMO: 0.6,
-                                  RiskCategory.SUNK_COST: 0.2,
-                                  },
+                severity=severity,
                 details={
                     "actual": job.amount,
                     "limit": limits.max_position_size,
@@ -171,7 +168,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         return patterns
 
     def _check_daily_trades_limit(self, job: Job, job_history: Dict[int, Job],
-                                  limits: UserLimits) -> List[Pattern]:
+                                  limits: UserLimits) -> List[AtomicPattern]:
         """Check if daily trades count exceeds limit"""
         patterns = []
 
@@ -185,16 +182,14 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         if trade_count >= limits.max_daily_trades > 0:
             violation_rate = trade_count / limits.max_daily_trades
 
-            confidence = self.calculate_dynamic_confidence(
+            severity = self.calculate_dynamic_severity(
                 violation_rate,
             )
 
-            patterns.append(Pattern(
+            patterns.append(AtomicPattern(
                 pattern_id="limit_daily_trades_count",
                 message="Daily limit of jobs was violated",
-                confidence=confidence,
-                category_weights={RiskCategory.OVERTRADING: 0.9,
-                                  RiskCategory.FOMO: 0.1},
+                severity=severity,
                 details={
                     "actual": trade_count,
                     "limit": limits.max_daily_trades,
@@ -205,7 +200,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         return patterns
 
     def _check_daily_volume_limit(self, job_history: Dict[int, Job],
-                                  limits: UserLimits) -> List[Pattern]:
+                                  limits: UserLimits) -> List[AtomicPattern]:
         """Check if daily volume exceeds limit"""
         patterns = []
 
@@ -219,17 +214,14 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         if total_volume >= limits.max_daily_volume > 0:
             violation_rate = total_volume / limits.max_daily_volume
-            confidence = self.calculate_dynamic_confidence(
+            severity = self.calculate_dynamic_severity(
                 violation_rate,
             )
 
-            patterns.append(Pattern(
+            patterns.append(AtomicPattern(
                 pattern_id="limit_daily_volume",
                 message="Daily volume limit exceeded",
-                confidence=confidence,
-                category_weights={RiskCategory.OVERTRADING: 0.6,
-                                  RiskCategory.FOMO: 0.2,
-                                  RiskCategory.SUNK_COST: 0.2},
+                severity=severity,
                 details={
                     "actual": total_volume,
                     "limit": limits.max_daily_volume,
@@ -240,7 +232,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         return patterns
 
     def _check_trade_cooldown(self, job: Job, job_history: Dict[int, Job],
-                              limits: UserLimits) -> List[Pattern]:
+                              limits: UserLimits) -> List[AtomicPattern]:
         """
         Check if trade cooldown period is violated across all jobs in history.
         This method analyzes the entire job history to find any instances where
@@ -272,18 +264,14 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
             if minutes_diff < cooldown_minutes:
                 violation_ratio = (cooldown_minutes - minutes_diff) / cooldown_minutes
-                confidence = self.calculate_dynamic_confidence(
+                severity = self.calculate_dynamic_severity(
                     violation_ratio,
                 )
-                patterns.append(Pattern(
+                patterns.append(AtomicPattern(
                     pattern_id="limit_cooldown",
                     job_id=[job.job_id],
                     message="Trade cooldown limit violated",
-                    confidence=confidence,
-                    category_weights={
-                        RiskCategory.OVERTRADING: 0.5,
-                        RiskCategory.FOMO: 0.5
-                    },
+                    severity=severity,
                     details={
                         "actual": minutes_diff,
                         "limit": cooldown_minutes,
@@ -295,7 +283,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
     # todo later if needed - rewrite using timestamp searching retrospectively
     def _check_concurrent_jobs(self, job_history: Dict[int, Job],
-                               limits: UserLimits) -> List[Pattern]:
+                               limits: UserLimits) -> List[AtomicPattern]:
         """
         Check if concurrent jobs limit is exceeded at any point in the job history.
         This method analyzes active jobs to identify periods when too many jobs
@@ -325,21 +313,17 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         if open_jobs_count > max_concurrent:
             violation_ratio = open_jobs_count / max_concurrent
 
-            confidence = self.calculate_dynamic_confidence(
+            severity = self.calculate_dynamic_severity(
                 violation_ratio,
             )
 
             open_job_ids = [j.job_id for j in open_jobs]
 
-            patterns.append(Pattern(
+            patterns.append(AtomicPattern(
                 pattern_id="limit_concurrent_jobs",
                 job_id=open_job_ids,
                 message=f"Concurrent jobs limit exceeded",
-                confidence=confidence,
-                category_weights={
-                    RiskCategory.OVERTRADING: 0.7,
-                    RiskCategory.FOMO: 0.3
-                },
+                severity=severity,
                 details={
                     "actual": open_jobs_count,
                     "limit": max_concurrent,
@@ -349,7 +333,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         return patterns
 
-    def _check_allow_force(self, job_history: Dict[int, Job], limits: UserLimits) -> List[Pattern]:
+    def _check_allow_force(self, job_history: Dict[int, Job], limits: UserLimits) -> List[AtomicPattern]:
         patterns = []
         if not limits or not hasattr(limits, 'allow_dca_force') or limits.allowDcaForce:
             logger.warning("Missing or invalid concurrent jobs limit, skipping check")
@@ -359,14 +343,10 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         for history_job in job_history.values():
             if history_job.discount_pct == 0:
                 violated_jobs.append(history_job)
-            patterns.append(Pattern(
+            patterns.append(AtomicPattern(
                 pattern_id="limit_force_job",
                 job_id=[history_job.job_id],
                 message="Found a job violating force limit",
-                confidence=0.2,
-                category_weights={
-                    RiskCategory.OVERTRADING: 0.5,
-                    RiskCategory.FOMO: 0.5
-                }
+                severity=1.0,
             ))
         return patterns

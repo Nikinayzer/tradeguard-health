@@ -13,7 +13,7 @@ from threading import Thread
 from typing import Dict, List, Any, Optional, Set, Union
 
 from src.models.risk_models import (
-    RiskCategory, RiskLevel, Pattern,
+    RiskCategory, RiskLevel, AtomicPattern
 )
 from src.models import Job
 from src.risk.aggregation_factory import AggregationFactory
@@ -126,7 +126,7 @@ class RiskProcessor:
                                  ):
         """Run specified evaluators in parallel"""
         futures = {}
-        all_patterns: List[Pattern] = []
+        all_patterns: List[AtomicPattern] = []
 
         logger.info(f"[RiskProcessor] Available evaluator keys: {list(self.evaluators.keys())}")
         logger.info(f"[RiskProcessor] Looking for evaluator IDs: {evaluator_ids}")

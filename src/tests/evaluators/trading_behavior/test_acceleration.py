@@ -10,7 +10,7 @@ from typing import Dict, List
 
 from src.models.job_models import Job
 from src.risk.evaluators.trading_behavior import TradingBehaviorEvaluator
-from src.models.risk_models import RiskCategory, Pattern
+from src.models.risk_models import RiskCategory, AtomicPattern
 
 
 class TestAcceleration(unittest.TestCase):
@@ -85,7 +85,7 @@ class TestAcceleration(unittest.TestCase):
         self.assertIn(101, pattern.job_id)
         self.assertIn(102, pattern.job_id)
         self.assertIn(103, pattern.job_id)
-        self.assertGreaterEqual(pattern.confidence, 0.4)
+        self.assertGreaterEqual(pattern.severity, 0.4)
 
         # Verify growth ratios (1st growth: 1.5, 2nd growth: 2.0)
         self.assertAlmostEqual(pattern.details["growth_ratios"][0], 1.5, places=2)
@@ -125,6 +125,7 @@ class TestAcceleration(unittest.TestCase):
         pattern = patterns[0]
         self.assertEqual(pattern.pattern_id, "position_acceleration")
         self.assertEqual(pattern.details["coin"], "BTC")
+
 
 if __name__ == '__main__':
     unittest.main()

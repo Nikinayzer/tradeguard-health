@@ -11,7 +11,7 @@ from src.models.job_updates import (
     Stopped, Finished, StepDone, OrdersPlaced,
     CanceledOrders, ErrorEvent, OpenOrderLog, CreatedMeta
 )
-from src.models.risk_models import Pattern, RiskCategory, RiskLevel
+from src.models.risk_models import RiskCategory, RiskLevel, BasePattern, AtomicPattern, CompositePattern
 from src.models.user_models import UserLimits
 from src.models.equity_models import Equity
 
@@ -39,7 +39,9 @@ __all__ = [
     'CreatedMeta',
     
     # Risk models
-    'Pattern',
+    'BasePattern',
+    'AtomicPattern',
+    'CompositePattern',
     'RiskCategory',
     'RiskLevel',
 

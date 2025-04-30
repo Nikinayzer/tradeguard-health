@@ -8,7 +8,7 @@ from abc import abstractmethod
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from src.models import Job, Pattern
+from src.models import Job, AtomicPattern
 from src.utils.log_util import get_logger
 
 logger = get_logger()
@@ -30,7 +30,7 @@ class BaseRiskEvaluator:
         self.description = description
 
     @abstractmethod
-    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[Pattern]:
+    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[AtomicPattern]:
         """
         Evaluate risk for a job.
         
@@ -82,7 +82,7 @@ class BaseRiskEvaluator:
         return decayed_confidence
 
     @classmethod
-    def calculate_dynamic_confidence(cls, violation_ratio: float, max_confidence: float = 1.0) -> float:
+    def calculate_dynamic_severity(cls, violation_ratio: float, max_confidence: float = 1.0) -> float:
         """
         Calculates confidence based purely on the violation ratio using a logarithmic scale.
         The confidence reaches 1.0 when violation_ratio equals 2.
