@@ -104,7 +104,7 @@ class PositionEvaluator(BaseRiskEvaluator):
                 )
 
                 patterns.append(AtomicPattern(
-                    pattern_id="long_holding_time",
+                    pattern_id="position_long_holding_time",
                     user_id=user_id,
                     message=f"Position on {symbol} held for {holding_days:.1f} days",
                     severity=severity,

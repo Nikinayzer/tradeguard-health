@@ -108,6 +108,18 @@ class PatternCompositionEngine:
             confidence_boost=0.25,
             message="Loss followed by increasing position size"
         ))
+        # Risk-seeking mb add added funds
+        self.rules.append(CompositePatternRule(
+            rule_id="loss_aversion",
+            pattern_ids=["position_long_holding_time", "position_unrealized_pnl_threshold"],
+            pattern_requirements={"position_long_holding_time": 1, "position_unrealized_pnl_threshold": 1},
+            category=RiskCategory.LOSS_BEHAVIOR,
+            time_window_minutes=1440,
+            sequence_matters=True,
+            confidence_boost=0.2,
+            message="Multiple consecutive losses detected"
+        ))
+        # Risk-aversion
         self.rules.append(CompositePatternRule(
             rule_id="cutting_profits",
             pattern_ids=["early_profit_exit"],
