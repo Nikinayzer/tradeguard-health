@@ -230,7 +230,7 @@ class PositionEvaluator(BaseRiskEvaluator):
 
                 if 0 < profit_pct <= self.EARLY_PROFIT_THRESHOLD:
                     patterns.append(AtomicPattern(
-                        pattern_id="early_profit_exit",
+                        pattern_id="position_early_profit_exit",
                         user_id=user_id,
                         message=f"Early profit exit on {symbol} ({profit_pct:.2%})",
                         severity=0.5,

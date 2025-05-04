@@ -55,10 +55,10 @@ class Job(BaseModel):
 
     @property
     def job_status(self) -> str:
-        """Return status if available, otherwise map event_type to status for compatibility"""
+        """Return status if available, otherwise map update_type to status for compatibility"""
         if self.status:
             return self.status
-        return self.event_type
+        return self.update_type
 
     @property
     def strategy(self) -> str:

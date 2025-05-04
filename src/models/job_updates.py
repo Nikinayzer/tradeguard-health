@@ -265,11 +265,11 @@ class JobEvent:
         if 'job_id' not in data:
             logger.error("Missing job_id in job event data")
             raise ValueError("Missing job_id in job event data")
-        if 'event_type' not in data:
-            logger.error("Missing event_type in job event data")
-            raise ValueError("Missing event_type in job event data")
+        if 'update_type' not in data:
+            logger.error("Missing update_type in job event data")
+            raise ValueError("Missing update_type in job event data")
 
-        event = JobEventType.from_value(data['event_type'])
+        event = JobEventType.from_value(data['update_type'])
         
         # Handle timestamp parsing from string to datetime
         timestamp_str = data.get('timestamp', datetime.now(timezone.utc).isoformat())
@@ -288,7 +288,7 @@ class JobEvent:
         result = {
             'job_id': self.job_id,
             'timestamp': timestamp_str,
-            'event_type': self.type.type_name
+            'update_type': self.type.type_name
         }
         # Optionally include extra fields for specific event types:
         if isinstance(self.type, Created):
