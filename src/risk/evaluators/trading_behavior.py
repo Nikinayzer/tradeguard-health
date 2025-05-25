@@ -1,44 +1,42 @@
 """
-Position Behavior Evaluator
+Trading Behavior Evaluator
 
-Analyzes job data to identify potentially risky position management behaviors, such as:
-- Double-down behavior (increasing position sizes after losses)
-- Position size acceleration (rapidly increasing position sizes)
-- Asset concentration (multiple positions in same asset)
+Evaluates trading behavior patterns.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Set, Tuple
 from collections import defaultdict
 
-from src.models import Job
+from src.models import Job, AtomicPattern, RiskCategory
 from src.risk.evaluators.base import BaseRiskEvaluator
+from src.state.state_manager import StateManager
 from src.utils.log_util import get_logger
-from src.models.risk_models import RiskCategory, AtomicPattern
 
 logger = get_logger()
 
 
 class TradingBehaviorEvaluator(BaseRiskEvaluator):
-    """Evaluates trading position behaviors that may indicate cognitive biases"""
+    """Evaluates trading behavior patterns."""
 
-    def __init__(self):
-        """Initialize the position behavior evaluator"""
+    def __init__(self, state_manager: StateManager):
+        """Initialize the evaluator."""
         super().__init__(
-            evaluator_id="trading_behavior_evaluator",
-            description="Detects risky position management behaviors like doubling down"
+            evaluator_id="trading_behavior",
+            description="Evaluates trading behavior patterns",
+            state_manager=state_manager
         )
 
-    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[AtomicPattern]:
+    def evaluate(self, user_id: int) -> List[AtomicPattern]:
         """
         Evaluate position behaviors across the entire job history.
         
         Args:
             user_id: User ID
-            job_history: User's job history as a dictionary mapping job_id to Job objects
             
         Returns:
             List of pattern objects
         """
+        job_history = self.state_manager.get_user_jobs(user_id)
         if not job_history:
             return []
 

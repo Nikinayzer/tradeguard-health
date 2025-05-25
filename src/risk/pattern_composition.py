@@ -96,7 +96,10 @@ class PatternCompositionEngine:
             time_window_minutes=720,
             sequence_matters=False,
             confidence_boost=0.15,
-            message="Multiple overtrading indicators detected"
+            greedy_consumption=True,
+            message="Multiple overtrading indicators detected. "
+                    "This may indicate overconfidence or impulsive trading behavior. "
+                    "Consider reviewing your trading strategy to avoid excessive trading activity."
         ))
         self.rules.append(CompositePatternRule(
             rule_id="loss_escalation",
@@ -106,9 +109,9 @@ class PatternCompositionEngine:
             time_window_minutes=1440,
             sequence_matters=True,
             confidence_boost=0.25,
-            message="Loss followed by increasing position size"
+            message="Loss followed by increasing position size. This may indicate loss-seeking behavior. "
+                    "Consider reviewing your trading strategy to avoid escalating losses."
         ))
-        # Risk-seeking mb add added funds
         self.rules.append(CompositePatternRule(
             rule_id="loss_aversion",
             pattern_ids=["position_long_holding_time", "position_unrealized_pnl_threshold"],
@@ -117,7 +120,9 @@ class PatternCompositionEngine:
             time_window_minutes=1440,
             sequence_matters=True,
             confidence_boost=0.2,
-            message="Multiple consecutive losses detected"
+            message="Multiple consecutive losses detected. This may indicate loss-averse behavior. "
+                    "Consider reviewing your trading strategy to ensure you are not holding "
+                    "onto losing positions longer than necessary."
         ))
         # Risk-aversion
         self.rules.append(CompositePatternRule(
@@ -128,8 +133,9 @@ class PatternCompositionEngine:
             time_window_minutes=1440 * 7,
             confidence_boost=0.2,
             greedy_consumption=True,
-            message=f"Multiple early profit exits detected"
-
+            message=f"Multiple early profit exits detected. This may indicate risk-averse behavior. "
+                    f"Consider reviewing your trading strategy to ensure you are not exiting profitable"
+                    f" positions too early."
         ))
 
     def add_rule(self, rule: CompositePatternRule):
@@ -150,23 +156,34 @@ class PatternCompositionEngine:
             List of composite patterns detected
         """
         if not patterns:
+            logger.info("[PatternCompositionEngine] No patterns to process")
             return []
 
         if current_time is None:
             current_time = datetime.now()
 
+        logger.info(f"[PatternCompositionEngine] Processing {len(patterns)} patterns")
+        logger.info(f"[PatternCompositionEngine] Available rules: {[r.rule_id for r in self.rules]}")
+
         composite_patterns = []
 
         patterns_by_id = self._index_patterns_by_id(patterns)
+        logger.info(f"[PatternCompositionEngine] Pattern types found: {list(patterns_by_id.keys())}")
 
         for rule in self.rules:
+            logger.info(f"[PatternCompositionEngine] Checking rule: {rule.rule_id}")
+            logger.info(f"[PatternCompositionEngine] Rule requires patterns: {rule.pattern_requirements}")
             matching_patterns = self._match_rule(rule, patterns_by_id, current_time)
             if matching_patterns:
+                logger.info(f"[PatternCompositionEngine] Rule {rule.rule_id} matched with {len(matching_patterns)} patterns")
                 composite_pattern = self._create_composite_pattern(rule, matching_patterns)
                 composite_patterns.append(composite_pattern)
                 logger.info(
-                    f"Detected composite pattern: {rule.rule_id} with confidence {composite_pattern.confidence:.2f}")
+                    f"[PatternCompositionEngine] Created composite pattern: {rule.rule_id} with confidence {composite_pattern.confidence:.2f}")
+            else:
+                logger.info(f"[PatternCompositionEngine] Rule {rule.rule_id} did not match")
 
+        logger.info(f"[PatternCompositionEngine] Found {len(composite_patterns)} composite patterns")
         return composite_patterns
 
     def _index_patterns_by_id(self, patterns: List[AtomicPattern]) -> Dict[str, List[AtomicPattern]]:
@@ -356,20 +373,30 @@ class PatternCompositionEngine:
         for pattern_list in patterns_by_type.values():
             pattern_list.sort(key=lambda p: p.start_time)
 
-        # Helper function to check if patterns are within time window
+        # Helper function to check if patterns are within time window of each other
         def patterns_within_window(patterns: List[AtomicPattern]) -> bool:
             if not patterns:
                 return False
 
-            # Find the earliest start and latest end
-            starts = [p.start_time for p in patterns]
-            ends = [p.end_time or p.start_time for p in patterns]
-
-            earliest_start = min(starts)
-            latest_end = max(ends)
-
-            # Check if total span is within window
-            return (latest_end - earliest_start).total_seconds() / 60 <= rule.time_window_minutes
+            # For each pattern, check if it's within time window of any other pattern
+            for i, pattern1 in enumerate(patterns):
+                pattern1_end = pattern1.end_time or pattern1.start_time
+                
+                # Check against all other patterns
+                for j, pattern2 in enumerate(patterns):
+                    if i == j:
+                        continue
+                        
+                    pattern2_end = pattern2.end_time or pattern2.start_time
+                    
+                    # Calculate time difference in minutes
+                    time_diff = abs((pattern1_end - pattern2_end).total_seconds() / 60)
+                    
+                    # If any pattern is within time window of another, the combination is valid
+                    if time_diff <= rule.time_window_minutes:
+                        return True
+            
+            return False
 
         # Helper function to find best combinations
         def find_combinations(current_combination: List[AtomicPattern], remaining_types: List[Tuple[str, int]]) -> List[List[AtomicPattern]]:

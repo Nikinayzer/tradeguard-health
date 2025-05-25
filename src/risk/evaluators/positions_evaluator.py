@@ -1,15 +1,14 @@
 """
-Position Evaluator
+Positions Evaluator
 
-Checks position data for potentially risky patterns based on unrealized PnL.
+Evaluates position-related risk patterns.
 """
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta, timezone
 
-from src.models import Job, Position
-from src.models.risk_models import RiskCategory, AtomicPattern
+from src.models import Position, AtomicPattern, RiskCategory
 from src.models.position_models import PositionUpdateType
-from src.risk.evaluators.base import BaseRiskEvaluator
+from src.risk.evaluators.base import BaseRiskEvaluator, RiskDataProvider
 from src.state.state_manager import StateManager
 from src.utils.log_util import get_logger
 
@@ -17,29 +16,37 @@ logger = get_logger()
 
 
 class PositionEvaluator(BaseRiskEvaluator):
-    """Evaluates position data for potentially risky patterns"""
+    """Evaluates position-related risk patterns."""
 
     def __init__(self, state_manager: StateManager):
-        """
-        Initialize the position evaluator.
-        
-        Args:
-            state_manager: The state manager for accessing position data
-        """
+        """Initialize the evaluator."""
         super().__init__(
             evaluator_id="positions_evaluator",
-            description="Checks positions for unrealized PnL thresholds"
+            description="Evaluates position-related risk patterns",
+            state_manager=state_manager
         )
-        self.state_manager = state_manager
 
         self.EARLY_PROFIT_THRESHOLD = 0.05
         self.LONG_HOLDING_DAYS_THRESHOLD = 7
 
-    def evaluate(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[AtomicPattern]:
+    def evaluate(self, user_id: int) -> List[AtomicPattern]:
+        """
+        Evaluate position data for risk patterns.
+        
+        Args:
+            user_id: User ID to evaluate
+            
+        Returns:
+            List of detected risk patterns
+        """
+        positions = self.state_manager.position_storage.get_user_positions(user_id)
+        if not positions:
+            return []
+
         patterns = []
-        patterns.extend(self.check_early_profit_exit(user_id, position_histories))
-        patterns.extend(self.check_unrealized_pnl(user_id, position_histories))
-        patterns.extend(self.check_long_holding_time(user_id, position_histories))
+        patterns.extend(self.check_early_profit_exit(user_id, positions))
+        patterns.extend(self.check_unrealized_pnl(user_id, positions))
+        patterns.extend(self.check_long_holding_time(user_id, positions))
         return patterns
 
     def check_long_holding_time(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[AtomicPattern]:
@@ -108,6 +115,8 @@ class PositionEvaluator(BaseRiskEvaluator):
                     user_id=user_id,
                     message=f"Position on {symbol} held for {holding_days:.1f} days",
                     severity=severity,
+                    unique=True,
+                    # category_weights={} ??,
                     details={
                         "position_key": position_key,
                         "symbol": symbol,

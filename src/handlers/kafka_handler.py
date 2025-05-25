@@ -247,7 +247,7 @@ class KafkaHandler(Generic[T]):
                 try:
                     message_data = _decode_and_parse_message(msg)
                     if message_data is not None:
-                        logger.info(f"!!!NEW MESSAGE FROM {self.topic}!!!")
+                        logger.debug(f"!!! NEW MESSAGE FROM {self.topic} !!!")
                         try:
                             event = self.deserializer(message_data)
                             message_handler(event)

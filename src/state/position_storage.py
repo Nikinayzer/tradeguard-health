@@ -8,7 +8,7 @@ Handles position storage, retrieval, and time-series tracking.
 import json
 import time
 from typing import Dict, List, Any, Optional, Set, Tuple, Union
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 
 from src.models.position_models import Position, PositionUpdateType
@@ -47,7 +47,7 @@ class PositionStorage:
         """
         return self._store_position_in_memory(position)
 
-    def get_position(self, user_id: int, venue: str, symbol: str) -> Optional[Dict[str, Any]]:
+    def get_position(self, user_id: int, venue: str, symbol: str) -> Optional[Dict[str, Position]]:
         """
         Get current position state.
 
@@ -68,36 +68,95 @@ class PositionStorage:
 
             return None
 
-    def get_user_position_histories(self, user_id: int) -> Dict[str, List[Position]]:
+    def get_active_positions(self, user_id: int) -> Dict[str, Position]:
+        """
+        Get all active positions for user (usd_amount > 0)
+
+        Returns:
+            Dictionary mapping user IDs to their active positions
+        """
+        with self._lock:
+            active_positions = {}
+
+            for position_key, position in self._positions_state.get(user_id, {}).items():
+                if position.usdt_amt > 0:
+                    active_positions[position_key] = position
+
+            return active_positions
+
+    def get_user_position_histories(self, user_id: int, hours: Optional[int] = None) -> Dict[str, List[Position]]:
         """
         Get position histories as lists of Position objects.
-        
+
         Args:
             user_id: The user ID
-            
+            hours: Optional number of hours to look back. If None, returns all history.
+
         Returns:
             Dictionary mapping position keys to lists of Position objects
         """
         histories = {}
-        
+        cutoff_time = None
+
+        if hours is not None:
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+
         # Get active positions for this user
         user_positions = self.get_user_positions(user_id)
-        
+
         for position_key, _ in user_positions.items():
             try:
                 venue, symbol = position_key.split('_', 1)
-                
+
                 # Get history as Position objects
                 history_items = self.get_position_history(user_id, venue, symbol)
-                
+
+                # Filter by timeframe if specified
+                if cutoff_time is not None:
+                    history_items = [
+                        position for position in history_items
+                        if position.timestamp >= cutoff_time
+                    ]
+
                 # Store with position key
                 histories[position_key] = history_items
             except ValueError:
                 logger.warning(f"Invalid position key format: {position_key}")
-        
+
         return histories
 
-    def get_position_by_key(self, user_id: int, position_key: str) -> Optional[Dict[str, Any]]:
+    def get_position_open_time(self, user_id: int, position_key: str) -> Optional[datetime]:
+        """
+        Get the time when a position was first opened by looking at its history.
+
+        Args:
+            user_id: User ID
+            position_key: Position key (venue_symbol)
+
+        Returns:
+            Datetime when position was first opened, or None if not found
+        """
+        with self._lock:
+            try:
+                venue, symbol = position_key.split('_', 1)
+                history = self.get_position_history(user_id, venue, symbol)
+
+                # Look for the first INCREASED event in history
+                for position in reversed(history):  # Search from oldest to newest
+                    if position.update_type == PositionUpdateType.INCREASED:
+                        return position.timestamp
+
+                # If no INCREASED event found, use the oldest position in history
+                if history:
+                    return history[-1].timestamp
+
+                return None
+
+            except ValueError:
+                logger.warning(f"Invalid position key format: {position_key}")
+                return None
+
+    def get_position_by_key(self, user_id: int, position_key: str) -> Optional[Dict[str, Position]]:
         """
         Get position by its key directly.
 
@@ -116,7 +175,7 @@ class PositionStorage:
 
             return None
 
-    def get_user_positions(self, user_id: int) -> Dict[str, Any]:
+    def get_user_positions(self, user_id: int) -> Dict[str, Position]:
         """
         Get all positions for a user.
 
@@ -135,7 +194,7 @@ class PositionStorage:
 
             return positions
 
-    def get_venue_positions(self, venue: str) -> Dict[str, Any]:
+    def get_venue_positions(self, venue: str) -> Dict[str, Position]:
         """
         Get all positions for a venue.
 
@@ -176,7 +235,8 @@ class PositionStorage:
             return []
 
     def get_position_history_by_update_type(self, user_id: int, venue: str, symbol: str,
-                                            update_types: List[Union[PositionUpdateType, str]], limit: int = 100) -> List[Position]:
+                                            update_types: List[Union[PositionUpdateType, str]], limit: int = 100) -> \
+            List[Position]:
         """
         Get position history filtered by update type.
 
@@ -218,7 +278,7 @@ class PositionStorage:
 
     def get_position_timeseries(self, user_id: int, venue: str, symbol: str,
                                 start_time: Optional[datetime] = None,
-                                end_time: Optional[datetime] = None) -> List[Dict[str, Any]]:
+                                end_time: Optional[datetime] = None) -> List[Dict[str, Position]]:
         """
         Get position time series data (PnL over time).
 
@@ -338,7 +398,8 @@ class PositionStorage:
                     # Remove from user positions
                     for position_key, position in self._venue_positions[venue].items():
                         user_id = position.user_id
-                        if user_id and user_id in self._positions_state and position_key in self._positions_state[user_id]:
+                        if user_id and user_id in self._positions_state and position_key in self._positions_state[
+                            user_id]:
                             del self._positions_state[user_id][position_key]
 
                     # Clear venue's positions
@@ -375,7 +436,7 @@ class PositionStorage:
         """Clear all position data."""
         self.clear_position_data()
 
-    def get_all_positions(self) -> Dict[int, Dict[str, Any]]:
+    def get_all_positions(self) -> Dict[int, Dict[str, Position]]:
         """
         Get all positions grouped by user.
 
@@ -402,25 +463,17 @@ class PositionStorage:
             venue = position.venue
             position_key = position.position_key
 
-            # Initialize user's positions if needed
             if user_id not in self._positions_state:
                 self._positions_state[user_id] = {}
-
-            # Initialize venue's positions if needed
             if venue not in self._venue_positions:
                 self._venue_positions[venue] = {}
 
-            # Get previous state to check for changes
             prev_position = self._positions_state.get(user_id, {}).get(position_key)
-
-            # Determine event type and whether to store in history
             store_in_history = False
-
-            # Trading events always stored
-            if position.update_type in [PositionUpdateType.INCREASED, PositionUpdateType.DECREASED, PositionUpdateType.CLOSED]:
+            if position.update_type in [PositionUpdateType.INCREASED, PositionUpdateType.DECREASED,
+                                        PositionUpdateType.CLOSED]:
                 store_in_history = True
 
-            # For snapshots, check if significant
             elif position.update_type == PositionUpdateType.SNAPSHOT:
                 # First time seeing this position - always store
                 if not prev_position:
@@ -428,15 +481,15 @@ class PositionStorage:
                 else:
                     # Check for significant changes
                     try:
-                        # Significant price movement (>2%)
+                        # Significant price movement (>5%)
                         if prev_position.mark_price > 0 and abs(
-                                (position.mark_price - prev_position.mark_price) / prev_position.mark_price) > 0.02:
+                                (position.mark_price - prev_position.mark_price) / prev_position.mark_price) > 0.05:
                             store_in_history = True
 
-                        # Significant PnL change (>10%)
+                        # Significant PnL change (>5%)
                         elif (prev_position.unrealized_pnl != 0 and position.unrealized_pnl != 0 and
                               abs((position.unrealized_pnl - prev_position.unrealized_pnl) / abs(
-                                  prev_position.unrealized_pnl)) > 0.1):
+                                  prev_position.unrealized_pnl)) > 0.05):
                             store_in_history = True
 
                         # Time-based sampling
@@ -460,18 +513,14 @@ class PositionStorage:
             self._positions_state[user_id][position_key] = position
             self._venue_positions[venue][position_key] = position
 
-            # Store history if needed
             if store_in_history:
-                # Create history key
                 history_key = f"{user_id}:{position_key}"
-
-                # Initialize history list if needed
                 if history_key not in self._position_history:
                     self._position_history[history_key] = []
 
                 # Store a copy of the Position object to avoid reference issues
                 position_copy = Position.from_dict(position.to_dict())
-                
+
                 # Add to front of list
                 self._position_history[history_key].insert(0, position_copy)
 
@@ -510,3 +559,34 @@ class PositionStorage:
 
             logger.debug(f"Stored position {position_key} for user {user_id} in memory (history: {store_in_history})")
             return store_in_history
+
+    def get_positions_in_time_window(self, user_id: int, start_time: datetime, end_time: datetime) -> Dict[
+        str, List[Position]]:
+        """
+        Get all positions for a user within a specified time window.
+
+        Args:
+            user_id: User ID
+            start_time: Start of time window (inclusive)
+            end_time: End of time window (inclusive)
+
+        Returns:
+            Dictionary mapping position keys to lists of Position objects within the time window
+        """
+        with self._lock:
+            positions_in_window = {}
+
+            # Get all position histories for the user
+            histories = self.get_user_position_histories(user_id)
+
+            for position_key, history in histories.items():
+                # Filter positions within time window
+                positions_in_window[position_key] = [
+                    position for position in history
+                    if start_time <= position.timestamp <= end_time
+                ]
+
+                # Sort by timestamp (newest first)
+                positions_in_window[position_key].sort(key=lambda x: x.timestamp, reverse=True)
+
+            return positions_in_window

@@ -41,7 +41,7 @@ class TradeGuardHealth:
             JobEvent.from_dict
         )
         self.position_handler = KafkaHandler(
-            Config.KAFKA_TOPIC_POSITION_UPDATES,
+            Config.KAFKA_TOPIC_CLEAN_POSITION_UPDATES,
             Position,
             Position.from_dict
         )
@@ -51,7 +51,7 @@ class TradeGuardHealth:
             Equity.from_dict
         )
         self.risk_notification_handler = KafkaHandler(
-            Config.KAFKA_TOPIC_RISK_NOTIFICATIONS,
+            Config.KAFKA_TOPIC_RISK_UPDATES,
             dict,
             lambda x: x
         )
@@ -86,16 +86,16 @@ class TradeGuardHealth:
         logger.debug("Updating dashboards...")
         if self.web_dashboard:
             try:
-                positions_state = self.state_manager.get_positions_state()
-                equity_state = self.state_manager.get_equity_state()
+                #positions_state = self.state_manager.position_storage.get_positions_state()
+                #equity_state = self.state_manager.equity_storage.get_equity_state()
 
                 self.web_dashboard.set_state_data(
-                    self.state_manager.get_jobs_state(),
-                    self.state_manager.get_dca_jobs(),
-                    self.state_manager.get_liq_jobs(),
-                    self.state_manager.get_job_to_user_map(),
-                    positions_state,
-                    equity_state
+                    self.state_manager.job_storage.get_jobs_state(),
+                    self.state_manager.job_storage.get_dca_jobs(),
+                    self.state_manager.job_storage.get_liq_jobs(),
+                    self.state_manager.job_storage.get_job_to_user_map(),
+                    #positions_state,
+                    #equity_state
                 )
             except Exception as e:
                 logger.error(f"Error updating web dashboard: {e}", exc_info=True)
@@ -113,14 +113,14 @@ class TradeGuardHealth:
                 job = Job.create_from_event(event)
                 logger.info(f"Created new job {job.job_id} from {event.type} event")
             else:
-                job = self.state_manager.get_job(event.job_id)
+                job = self.state_manager.job_storage.get_job(event.job_id)
                 if not job:
                     logger.warning(f"Received event for non-existent job: {event.job_id}")
                     return
                 job.apply_event(event)
-                logger.info(f"Updated job {job.job_id} with {event.type} event")
+                logger.debug(f"Updated job {job.job_id} with {event.type} event")
 
-            self.state_manager.store_job(job)
+            self.state_manager.job_storage.store_job(job)
             logger.debug(f"Stored job {job.job_id} in state manager")
 
             # Run risk analysis for non-historical events
@@ -141,8 +141,8 @@ class TradeGuardHealth:
         1. Store position in state manager
         """
         try:
-            self.state_manager.store_position(position)
-            logger.info(f"Updated position for {position.symbol} on {position.venue} for user {position.user_id}")
+            self.state_manager.position_storage.store_position(position)
+            logger.debug(f"Updated position for {position.symbol} on {position.venue} for user {position.user_id}")
             if self.web_dashboard:
                 self._update_dashboards()
         except Exception as e:
@@ -154,8 +154,8 @@ class TradeGuardHealth:
         1. Store equity in state manager
         """
         try:
-            self.state_manager.store_equity(equity)
-            logger.info(f"Updated equity for {equity.equity_key}")
+            self.state_manager.equity_storage.store_equity(equity)
+            logger.debug(f"Updated equity for {equity.equity_key}")
             if self.web_dashboard:
                 self._update_dashboards()
         except Exception as e:
@@ -177,9 +177,9 @@ class TradeGuardHealth:
                     logger.info(f"Processed {count} historical events...")
 
             # Get final state counts
-            jobs_state = self.state_manager.get_jobs_state()
-            dca_jobs = self.state_manager.get_dca_jobs()
-            liq_jobs = self.state_manager.get_liq_jobs()
+            jobs_state = self.state_manager.job_storage.get_jobs_state()
+            dca_jobs = self.state_manager.job_storage.get_dca_jobs()
+            liq_jobs = self.state_manager.job_storage.get_liq_jobs()
 
             total_jobs = sum(len(jobs) for jobs in jobs_state.values())
             total_dca_jobs = sum(len(jobs) for jobs in dca_jobs.values())
@@ -194,7 +194,7 @@ class TradeGuardHealth:
                 historical_positions = self.position_handler.read_topic_from_beginning()
                 position_count = 0
                 for position in historical_positions:
-                    self.state_manager.store_position(position)
+                    self.state_manager.position_storage.store_position(position)
                     position_count += 1
                     if position_count % 100 == 0:
                         logger.info(f"Processed {position_count} historical positions...")
@@ -209,7 +209,7 @@ class TradeGuardHealth:
                 historical_equities = self.equity_handler.read_topic_from_beginning()
                 equity_count = 0
                 for equity in historical_equities:
-                    self.state_manager.store_equity(equity)
+                    self.state_manager.equity_storage.store_equity(equity)
                     equity_count += 1
                     if equity_count % 100 == 0:
                         logger.info(f"Processed {equity_count} historical equities...")

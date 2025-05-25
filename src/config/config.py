@@ -15,8 +15,9 @@ class Config:
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:19092')
     KAFKA_CONSUMER_GROUP: str = os.getenv('KAFKA_CONSUMER_GROUP', 'tradeguard-health')
     KAFKA_TOPIC_JOB_UPDATES: str = os.getenv('KAFKA_TOPIC_JOB_UPDATES', 'job-updates')
-    KAFKA_TOPIC_RISK_NOTIFICATIONS: str = os.getenv('KAFKA_TOPIC_RISK_NOTIFICATIONS', 'risk-notifications')
+    KAFKA_TOPIC_RISK_UPDATES: str = os.getenv('KAFKA_TOPIC_RISK_UPDATES', 'risk-updates')
     KAFKA_TOPIC_POSITION_UPDATES: str = os.getenv('KAFKA_TOPIC_POSITION_UPDATES', 'position-updates')
+    KAFKA_TOPIC_CLEAN_POSITION_UPDATES: str = os.getenv('KAFKA_TOPIC_CLEAN_POSITION_UPDATES', 'clean-position-updates')
     KAFKA_TOPIC_ORDER_FLOW: str = os.getenv('KAFKA_TOPIC_ORDER_FLOW', 'order-flow')
     KAFKA_TOPIC_EQUITY: str = os.getenv('KAFKA_TOPIC_EQUITY', 'equity')
 
@@ -54,7 +55,7 @@ class Config:
             return "KAFKA_CONSUMER_GROUP is not set"
         if not cls.KAFKA_TOPIC_JOB_UPDATES:
             return "KAFKA_TOPIC_JOB_UPDATES is not set"
-        if not cls.KAFKA_TOPIC_RISK_NOTIFICATIONS:
+        if not cls.KAFKA_TOPIC_RISK_UPDATES:
             return "KAFKA_TOPIC_RISK_NOTIFICATIONS is not set"
 
         return None

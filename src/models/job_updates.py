@@ -273,7 +273,8 @@ class JobEvent:
         
         # Handle timestamp parsing from string to datetime
         timestamp_str = data.get('timestamp', datetime.now(timezone.utc).isoformat())
-        timestamp = parse_timestamp(timestamp_str) if isinstance(timestamp_str, str) else timestamp_str
+        # Always use parse_timestamp to ensure timezone awareness
+        timestamp = parse_timestamp(timestamp_str)
             
         return cls(
             job_id=data['job_id'],

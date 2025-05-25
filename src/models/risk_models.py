@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 from typing import List, Dict, Any, Optional, Union, Literal
@@ -30,20 +30,28 @@ class BasePattern(BaseModel):
     """Base model for a pattern."""
     pattern_id: str
     job_id: Optional[List[int]] = None
-    position_id: Optional[int] = None
+    positions_key: Optional[List[str]] = None
     message: str
     category_weights: Optional[Dict[RiskCategory, float]] = None
     details: Optional[Dict[str, Any]] = None
-    start_time: Optional[datetime] = Field(default_factory=datetime.now)
+    start_time: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
-#   consumed: bool = False
     show_if_not_consumed: bool = True  # some atomic patterns should not be shown if not consumed
-    is_composite: bool = False  # leave?
+    is_composite: bool = False
+    unique: bool = False # if True, only one instance of this pattern can exist at a time
+    ttl_minutes: Optional[int] = None  # Time-to-live in minutes, None = no expiration
 
     @property
-    def timestamp(self) -> datetime:
-        """Legacy compatibility - returns end_time if available, otherwise start_time."""
-        return self.end_time or self.start_time
+    def is_active(self) -> bool:
+        """Check if the pattern is still active based on TTL."""
+        if not self.ttl_minutes:
+            return True
+            
+        if not self.start_time:
+            return False
+            
+        expiration_time = self.start_time + timedelta(minutes=self.ttl_minutes)
+        return datetime.now(timezone.utc) < expiration_time
 
     @property
     def duration_minutes(self) -> Optional[float]:
@@ -56,7 +64,7 @@ class BasePattern(BaseModel):
     @property
     def internal_id(self) -> str:
         """Generate a shorter, cleaner unique ID hash for pattern tracking."""
-        data = f"{self.pattern_id}_{self.timestamp.isoformat() if self.timestamp else ''}"
+        data = f"{self.pattern_id}_{self.start_time.isoformat() if self.start_time else ''}"
         if self.job_id:
             data += f"_{'_'.join(map(str, self.job_id))}"
 
@@ -98,16 +106,16 @@ class RiskRepost(BaseModel):
     """Base model for risk alerts sent to Kafka."""
     event_type: Literal["RiskReport"] = "RiskReport"
     user_id: int
-    job_id: Optional[int]
     top_risk_level: RiskLevel
     top_risk_confidence: float = Field(ge=0.0, le=100.0)
     top_risk_type: RiskCategory
     category_scores: Dict[RiskCategory, float]
     patterns: List[AtomicPattern]
     composite_patterns: List[CompositePattern]
-    decay_params: Dict[str, Any]
-    metadata: Dict[str, Any] = Field(default_factory=dict)  # Additional report metadata
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    atomic_patterns_number: int = 0
+    composite_patterns_number: int = 0
+    consumed_patterns_number: int = 0
 
     class Config:
         json_encoders = {

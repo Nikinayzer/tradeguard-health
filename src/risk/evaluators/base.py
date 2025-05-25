@@ -5,44 +5,65 @@ Provides the foundation class for all risk evaluators.
 """
 import math
 from abc import abstractmethod
-from datetime import datetime
-from typing import Dict, List, Any, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Any, Optional, Protocol
 
-from src.models import Job, AtomicPattern
+from src.models import Job, Position, Equity, AtomicPattern, CompositePattern
+from src.state.state_manager import StateManager
 from src.utils.log_util import get_logger
 
 logger = get_logger()
 
 
+class RiskDataProvider(Protocol):
+    """Interface for providing access to state management."""
+    @property
+    def job_storage(self):
+        """Get job storage instance."""
+        ...
+
+    @property
+    def position_storage(self):
+        """Get position storage instance."""
+        ...
+
+    @property
+    def equity_storage(self):
+        """Get equity storage instance."""
+        ...
+
+    @property
+    def pattern_storage(self):
+        """Get pattern storage instance."""
+        ...
+
+
 class BaseRiskEvaluator:
     """Base class for all risk evaluators"""
 
-    @abstractmethod
-    def __init__(self, evaluator_id: str, description: str):
+    def __init__(self, evaluator_id: str, description: str, state_manager: StateManager):
         """
         Initialize the base evaluator.
         
         Args:
             evaluator_id: Unique identifier for this evaluator
             description: Description of what this evaluator analyzes
+            state_manager: State manager instance for accessing data
         """
         self.evaluator_id = evaluator_id
         self.description = description
+        self.state_manager = state_manager
 
     @abstractmethod
-    def evaluate(self, user_id: int, job_history: Dict[int, Job]) -> List[AtomicPattern]:
+    def evaluate(self, user_id: int) -> List[AtomicPattern]:
         """
-        Evaluate risk for a job.
+        Evaluate risk for a user.
         
         Args:
-            user_id: User ID
-            job_history: User's job history as a dictionary mapping job_id to Job objects
+            user_id: User ID to evaluate
             
         Returns:
-            List of evidence dictionaries, each containing:
-                - category_id: Risk category ID
-                - confidence: Confidence level (0-1)
-                - data: Additional evidence data
+            List of detected risk patterns
         """
         raise NotImplementedError("Subclasses must implement evaluate()")
 
@@ -57,11 +78,14 @@ class BaseRiskEvaluator:
 
         Uses exponential decay formula: confidence * (0.5)^(time/half_life)
 
-        Args: confidence: Original confidence value (0.0-1.0) event_time: When the event occurred current_time: Current
-        time (defaults to now) half_life_minutes: Minutes after which confidence is halved.
-         30-60 for Rapid Decay (FOMO, Panic),
-         120-240 for Intra-Day Patterns,
-         720-1440 for Daily Patterns
+        Args: 
+            confidence: Original confidence value (0.0-1.0) 
+            event_time: When the event occurred 
+            current_time: Current time (defaults to now) 
+            half_life_minutes: Minutes after which confidence is halved.
+             30-60 for Rapid Decay (FOMO, Panic),
+             120-240 for Intra-Day Patterns,
+             720-1440 for Daily Patterns
 
         Returns:
             Decayed confidence value
@@ -70,7 +94,7 @@ class BaseRiskEvaluator:
             return confidence
 
         if current_time is None:
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
 
         time_diff = (current_time - event_time).total_seconds() / 60.0
         if time_diff < 0:

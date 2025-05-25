@@ -100,7 +100,7 @@ class DateTimeUtils:
             timestamp: A string timestamp (ISO format preferred) or epoch timestamp
             
         Returns:
-            datetime object or None if parsing fails
+            Timezone-aware datetime object (UTC) or None if parsing fails
         """
         if not timestamp:
             return None
@@ -108,7 +108,7 @@ class DateTimeUtils:
         # If numeric, treat as epoch timestamp
         if isinstance(timestamp, (int, float)):
             try:
-                return datetime.fromtimestamp(timestamp)
+                return datetime.fromtimestamp(timestamp, tz=timezone.utc)
             except (ValueError, OverflowError, OSError):
                 return None
                 
@@ -133,7 +133,8 @@ class DateTimeUtils:
                             micro = micro.ljust(6, '0')
                         timestamp = f"{timestamp_base}.{micro}"
                     
-                    return datetime.strptime(timestamp, cls.ISO_FORMAT)
+                    dt = datetime.strptime(timestamp, cls.ISO_FORMAT)
+                    return dt.replace(tzinfo=timezone.utc)
                 else:
                     # No microseconds
                     # Remove timezone if present
@@ -142,7 +143,8 @@ class DateTimeUtils:
                     if '+' in timestamp:
                         timestamp = timestamp.split('+')[0]
                     
-                    return datetime.strptime(timestamp, cls.ISO_FORMAT_NO_MS)
+                    dt = datetime.strptime(timestamp, cls.ISO_FORMAT_NO_MS)
+                    return dt.replace(tzinfo=timezone.utc)
             except ValueError:
                 pass
                 
@@ -160,7 +162,8 @@ class DateTimeUtils:
             
             for fmt in formats:
                 try:
-                    return datetime.strptime(timestamp, fmt)
+                    dt = datetime.strptime(timestamp, fmt)
+                    return dt.replace(tzinfo=timezone.utc)
                 except ValueError:
                     continue
                     
