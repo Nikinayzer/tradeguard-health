@@ -7,13 +7,12 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime
 from dotenv import load_dotenv
-from typing import Dict, List, Any, Optional
 
 from src.config.config import Config
-from src.handlers.kafka_handler import KafkaHandler, TopicConfig
+from src.handlers.kafka_handler import KafkaHandler
 from src.models import JobEvent, Created, Job, Position, Equity
+from src.models.position_models import PositionUpdateType
 
 from src.dashboard.web_dashboard import WebDashboard
 from src.utils.log_util import setup_logging, get_logger
@@ -86,16 +85,11 @@ class TradeGuardHealth:
         logger.debug("Updating dashboards...")
         if self.web_dashboard:
             try:
-                #positions_state = self.state_manager.position_storage.get_positions_state()
-                #equity_state = self.state_manager.equity_storage.get_equity_state()
-
                 self.web_dashboard.set_state_data(
                     self.state_manager.job_storage.get_jobs_state(),
                     self.state_manager.job_storage.get_dca_jobs(),
                     self.state_manager.job_storage.get_liq_jobs(),
                     self.state_manager.job_storage.get_job_to_user_map(),
-                    #positions_state,
-                    #equity_state
                 )
             except Exception as e:
                 logger.error(f"Error updating web dashboard: {e}", exc_info=True)
@@ -128,25 +122,34 @@ class TradeGuardHealth:
                 self._update_dashboards()
                 try:
                     user_id = job.user_id
-                    self.risk_processor.run_preset("limits_only", user_id)
+                   # self.risk_processor.run_preset("default", user_id)
                 except Exception as e:
                     logger.error(f"Error in risk processing for job {job.job_id}: {str(e)}", exc_info=True)
 
         except Exception as e:
             logger.error(f"Error processing event for job {event.job_id}: {e}", exc_info=True)
 
-    def _process_position(self, position: Position) -> None:
+    def _process_position_event(self, position: Position, is_historical: bool = False) -> None:
         """
-        Process a position update:
+        Process a single position event:
         1. Store position in state manager
+        2. Trigger risk analysis if needed
         """
         try:
             self.state_manager.position_storage.store_position(position)
             logger.debug(f"Updated position for {position.symbol} on {position.venue} for user {position.user_id}")
-            if self.web_dashboard:
-                self._update_dashboards()
+
+            if not is_historical:
+                if position.update_type in [PositionUpdateType.INCREASED, PositionUpdateType.DECREASED, PositionUpdateType.CLOSED]:
+                    logger.info(f"Processing critical position event for {position.position_key}")
+                    self.risk_processor.run_preset("default", position.user_id)
+                    if self.web_dashboard:
+                        self._update_dashboards()
+                else:
+                    logger.debug(f"Skipping evaluation for non-critical position event: {position.update_type}")
+                    
         except Exception as e:
-            logger.error(f"Error processing position: {e}", exc_info=True)
+            logger.error(f"Error processing position event: {e}", exc_info=True)
 
     def _process_equity(self, equity: Equity) -> None:
         """
@@ -194,7 +197,7 @@ class TradeGuardHealth:
                 historical_positions = self.position_handler.read_topic_from_beginning()
                 position_count = 0
                 for position in historical_positions:
-                    self.state_manager.position_storage.store_position(position)
+                    self._process_position_event(position, is_historical=True)
                     position_count += 1
                     if position_count % 100 == 0:
                         logger.info(f"Processed {position_count} historical positions...")
@@ -223,6 +226,17 @@ class TradeGuardHealth:
             logger.error(f"Failed to initialize state from Kafka: {e}", exc_info=True)
             logger.warning("Continuing with empty state...")
 
+        try:
+            logger.info("Running risk presets for all users after historical load...")
+            all_user_ids = set(self.state_manager.job_storage.get_job_to_user_map().values()) #todo user management
+
+            for user_id in all_user_ids:
+                self.risk_processor.run_preset("default", user_id)
+
+            logger.info("Finished running risk presets after historical data load")
+        except Exception as e:
+            logger.error(f"Error running risk presets after historical load: {e}", exc_info=True)
+
     def run(self) -> None:
         """Main application loop."""
         logger.info("TradeGuard Health service is running")
@@ -248,7 +262,7 @@ class TradeGuardHealth:
             logger.info("Starting to process position messages...")
             position_thread = threading.Thread(
                 target=self.position_handler.process_messages,
-                args=(self._process_position,),
+                args=(self._process_position_event,),
                 daemon=True
             )
             position_thread.start()

@@ -124,46 +124,48 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 return patterns
 
             logger.info("[UserLimitsEvaluator] Running checks:")
-            
+
             try:
-                logger.info("[UserLimitsEvaluator] Running single job limit check...")
+                logger.debug("[UserLimitsEvaluator] Running single job limit check...")
                 if pattern := (self._check_single_job_limit(job=job, limits=user_limits)):
-                    logger.info(f"[UserLimitsEvaluator] Single job pattern created with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
                     patterns.append(pattern)
             except Exception as e:
                 logger.error(f"[UserLimitsEvaluator] Error in single job limit check: {str(e)}")
-                
+
             try:
-                logger.info("[UserLimitsEvaluator] Running daily trades limit check...")
+                logger.debug("[UserLimitsEvaluator] Running daily trades limit check...")
                 if pattern := (self._check_daily_trades_limit(job_history=job_history, limits=user_limits)):
-                    logger.info(f"[UserLimitsEvaluator] Daily trades pattern created with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
                     patterns.append(pattern)
             except Exception as e:
                 logger.error(f"[UserLimitsEvaluator] Error in daily trades limit check: {str(e)}")
-                
+
             try:
-                logger.info("[UserLimitsEvaluator] Running daily volume limit check...")
+                logger.debug("[UserLimitsEvaluator] Running daily volume limit check...")
                 if pattern := self._check_daily_volume_limit(position_histories=position_histories, limits=user_limits):
-                    logger.info(f"[UserLimitsEvaluator] Daily volume pattern created with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
                     patterns.append(pattern)
             except Exception as e:
                 logger.error(f"[UserLimitsEvaluator] Error in daily volume limit check: {str(e)}")
-                
+
             try:
-                logger.info("[UserLimitsEvaluator] Running trade cooldown check...")
+                logger.debug("[UserLimitsEvaluator] Running trade cooldown check...")
                 if pattern := (self._check_trade_cooldown(job_history=job_history, limits=user_limits)):
-                    logger.info(f"[UserLimitsEvaluator] Trade cooldown pattern created with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
                     patterns.append(pattern)
             except Exception as e:
                 logger.error(f"[UserLimitsEvaluator] Error in trade cooldown check: {str(e)}")
-                
+
             try:
-                logger.info("[UserLimitsEvaluator] Running concurrent jobs check...")
+                logger.debug("[UserLimitsEvaluator] Running concurrent jobs check...")
                 if pattern := self._check_concurrent_jobs(job_history=job_history, limits=user_limits):
-                    logger.info(f"[UserLimitsEvaluator] Concurrent jobs pattern created with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
                     patterns.append(pattern)
             except Exception as e:
                 logger.error(f"[UserLimitsEvaluator] Error in concurrent jobs check: {str(e)}")
+
+            try:
+                logger.debug("[UserLimitsEvaluator] Running force job check...")
+                if pattern := self._check_force(job=job):
+                    patterns.append(pattern)
+            except Exception as e:
+                logger.error(f"[UserLimitsEvaluator] Error in force job check: {str(e)}")
 
             logger.info(f"[UserLimitsEvaluator] Evaluation complete. Found {len(patterns)} patterns")
             return patterns
@@ -178,15 +180,16 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             logger.warning("Missing or invalid position size limit, skipping check")
             return None
 
-        if job.amount > limits.max_position_size > 0:
+        if job.amount > limits.max_position_size > 0 and job.is_dca_job:
             violation_rate = job.amount / limits.max_position_size
             severity = self.calculate_dynamic_severity(violation_rate)
 
             pattern = AtomicPattern(
                 pattern_id="limit_single_job_amount",
                 job_id=[job.job_id],
-                message="Single job amount exceeded",
+                message=f"Maximum amount for job {job.id} exceeded",
                 severity=severity,
+                unique=True,
                 ttl_minutes=60 * 24,
                 details={
                     "actual": job.amount,
@@ -194,7 +197,8 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                     "ratio": violation_rate,
                 }
             )
-            logger.info(f"[UserLimitsEvaluator] Created single job pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
+            logger.info(
+                f"[UserLimitsEvaluator] Created single job pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
             return pattern
         return None
 
@@ -225,7 +229,8 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                     "ratio": violation_rate,
                 }
             )
-            logger.info(f"[UserLimitsEvaluator] Created daily trades pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
+            logger.info(
+                f"[UserLimitsEvaluator] Created daily trades pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
             return pattern
         return None
 
@@ -269,7 +274,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 logger.error(f"Error processing position history for {position_key}: {e}")
                 continue
 
-        # Check if volume limit is exceeded
         if total_volume >= limits.max_daily_volume > 0:
             violation_ratio = total_volume / limits.max_daily_volume
             severity = self.calculate_dynamic_severity(violation_ratio)
@@ -308,18 +312,14 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             logger.warning("Missing or invalid trade cooldown limit, skipping check")
             return None
 
-        # Get the last two jobs by timestamp
         jobs = list(job_history.values())
         if len(jobs) < 2:
             logger.info("[UserLimitsEvaluator] Less than 2 jobs found, skipping cooldown check")
             return None
 
-        # Sort by timestamp and get last two
         jobs.sort(key=lambda j: j.timestamp)
         current_job = jobs[-1]
         previous_job = jobs[-2]
-        
-        logger.info(f"[UserLimitsEvaluator] Comparing jobs: current={current_job.job_id} ({current_job.timestamp}, tzinfo={current_job.timestamp.tzinfo}), previous={previous_job.job_id} ({previous_job.timestamp}, tzinfo={previous_job.timestamp.tzinfo})")
 
         # Calculate time difference in minutes
         time_diff = current_job.timestamp - previous_job.timestamp
@@ -327,22 +327,27 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
 
         cooldown_minutes = limits.min_trade_interval_minutes
         if minutes_diff < cooldown_minutes:
-            violation_ratio = (cooldown_minutes - minutes_diff) / cooldown_minutes
-            severity = self.calculate_dynamic_severity(violation_ratio)
+            minutes_early = cooldown_minutes - minutes_diff
+            violation_ratio = minutes_early / cooldown_minutes
+            severity = self.calculate_dynamic_severity(violation_ratio, inverted=True)
 
             pattern = AtomicPattern(
                 pattern_id="limit_cooldown",
-                job_id=[current_job.job_id],
-                message="Trade cooldown limit violated",
+                job_id=[current_job.id],
+                message=f"Cooldown between strategies {current_job.id} and {previous_job.id} was violated",
                 severity=severity,
+                unique=True,
                 ttl_minutes=60 * 24,
                 details={
-                    "actual": minutes_diff,
-                    "limit": cooldown_minutes,
-                    "ratio": violation_ratio,
+                    "actual_interval_minutes": round(minutes_diff, 2),
+                    "required_cooldown_minutes": cooldown_minutes,
+                    "violation_minutes": round(minutes_early, 2),
+                    "violation_ratio": round(violation_ratio, 3),
+                    "severity_score": round(severity, 3),
                 }
             )
-            logger.info(f"[UserLimitsEvaluator] Created cooldown pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
+            logger.info(
+                f"[UserLimitsEvaluator] Created cooldown pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
             return pattern
 
         return None
@@ -370,7 +375,6 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
         for history_job in job_history.values():
             if history_job.is_active:
                 open_jobs.append(history_job)
-                logger.info(f"[UserLimitsEvaluator] Active job {history_job.job_id} timestamp: {history_job.timestamp}, tzinfo={history_job.timestamp.tzinfo}")
 
         open_jobs_count = len(open_jobs) - 1
         max_concurrent = limits.max_concurrent_jobs
@@ -383,6 +387,7 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
             pattern = AtomicPattern(
                 pattern_id="limit_concurrent_jobs",
                 job_id=open_job_ids,
+                unique=True,
                 message=f"Concurrent jobs limit exceeded",
                 severity=severity,
                 ttl_minutes=60 * 24,
@@ -394,24 +399,19 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                     "ratio": violation_ratio,
                 }
             )
-            logger.info(f"[UserLimitsEvaluator] Created concurrent jobs pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
+            logger.info(
+                f"[UserLimitsEvaluator] Created concurrent jobs pattern with start_time={pattern.start_time}, tzinfo={pattern.start_time.tzinfo}")
             return pattern
 
         return None
 
-    def _check_allow_force(self, job_history: Dict[int, Job], limits: UserLimits) -> Optional[AtomicPattern]:
-        # if not limits or not hasattr(limits, 'allow_dca_force') or limits.allowDcaForce:
-        #     logger.warning("Missing or invalid concurrent jobs limit, skipping check")
-        #     return None
-
-        violated_jobs = []
-        for history_job in job_history.values():
-            if history_job.discount_pct == 0:
-                violated_jobs.append(history_job)
+    def _check_force(self, job: Job) -> Optional[AtomicPattern]:
+        if job.discount_pct == 0:
             return AtomicPattern(
                 pattern_id="limit_force_job",
-                job_id=[history_job.job_id],
-                message="Found a job violating force limit",
+                job_id=[job.id],
+                unique=True,
+                message=f"Job {job.id} has force parameter.",
                 severity=1.0,
                 ttl_minutes=60 * 24,
             )

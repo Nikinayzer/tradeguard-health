@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
-from typing import List, Dict, Any, Optional, Union, Literal
-from pydantic import BaseModel, Field, field_validator, computed_field
+from typing import List, Dict, Any, Optional,Literal, cast
+from pydantic import BaseModel, Field, computed_field
 
 from src.utils import log_util
 
@@ -14,7 +14,6 @@ class RiskCategory(str, Enum):
     OVERCONFIDENCE = "overconfidence"
     FOMO = "fomo"
     LOSS_BEHAVIOR = "loss_behavior"  # loss-aversion + loss-seeking
-    SUNK_COST = "sunk_cost"
 
 
 class RiskLevel(str, Enum):
@@ -26,30 +25,43 @@ class RiskLevel(str, Enum):
     CRITICAL = "critical"  # > 90
 
 
+def default_category_weights() -> Dict[RiskCategory, float]:
+    equal_weight = 1.0 / len(RiskCategory)
+    return cast(Dict[RiskCategory, float], {
+        category: equal_weight for category in RiskCategory
+    })
+
+
 class BasePattern(BaseModel):
     """Base model for a pattern."""
     pattern_id: str
     job_id: Optional[List[int]] = None
-    positions_key: Optional[List[str]] = None
+    position_key: Optional[str] = None
     message: str
-    category_weights: Optional[Dict[RiskCategory, float]] = None
+    category_weights: Optional[Dict[RiskCategory, float]] = Field(default_factory=default_category_weights)
     details: Optional[Dict[str, Any]] = None
     start_time: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
     show_if_not_consumed: bool = True  # some atomic patterns should not be shown if not consumed
     is_composite: bool = False
-    unique: bool = False # if True, only one instance of this pattern can exist at a time
-    ttl_minutes: Optional[int] = None  # Time-to-live in minutes, None = no expiration
+    unique: bool = False  # if True, only one instance of this pattern can exist at a time
+    ttl_minutes: Optional[int] = 60  # Time-to-live in minutes, None = no expiration
+
+    @property
+    def category(self) -> RiskCategory:
+        """Get the primary category for this pattern."""
+        weights = self.category_weights
+        return max(weights.items(), key=lambda x: x[1])[0]
 
     @property
     def is_active(self) -> bool:
         """Check if the pattern is still active based on TTL."""
         if not self.ttl_minutes:
             return True
-            
+
         if not self.start_time:
             return False
-            
+
         expiration_time = self.start_time + timedelta(minutes=self.ttl_minutes)
         return datetime.now(timezone.utc) < expiration_time
 
@@ -63,15 +75,31 @@ class BasePattern(BaseModel):
     @computed_field
     @property
     def internal_id(self) -> str:
-        """Generate a shorter, cleaner unique ID hash for pattern tracking."""
-        data = f"{self.pattern_id}_{self.start_time.isoformat() if self.start_time else ''}"
-        if self.job_id:
-            data += f"_{'_'.join(map(str, self.job_id))}"
+        """Generate a unique ID hash for pattern tracking."""
+        if self.is_composite:
+            data = [
+                self.pattern_id,
+                self.start_time.isoformat() if self.start_time else '',
+                '_'.join(sorted(self.component_patterns)) if hasattr(self, 'component_patterns') else '',
+                f"{self.confidence:.2f}" if hasattr(self, 'confidence') else '',
+                '_'.join(
+                    f"{k}:{v:.2f}" for k, v in sorted(self.category_weights.items())) if self.category_weights else ''
+            ]
+        else:
+            data = [
+                self.pattern_id,
+                self.start_time.isoformat() if self.start_time else '',
+                '_'.join(map(str, self.job_id)) if self.job_id else '',
+                self.position_key or '',
+                f"{self.severity:.2f}" if hasattr(self, 'severity') else '',
+                '_'.join(
+                    f"{k}:{v:.2f}" for k, v in sorted(self.category_weights.items())) if self.category_weights else ''
+            ]
 
-        # Create a short hash (first 8 chars of md5)
-        hash_obj = hashlib.md5(data.encode())
-        short_hash = hash_obj.hexdigest()[:8]
-        # Format: pattern_type:short_hash (e.g., "daily_limit:a1b2c3d4")
+        data_str = '||'.join(filter(None, data))
+        hash_obj = hashlib.md5(data_str.encode())
+        short_hash = hash_obj.hexdigest()[:12]
+
         pattern_type = self.pattern_id.split('_')[0] if '_' in self.pattern_id else self.pattern_id
         return f"{pattern_type}:{short_hash}"
 

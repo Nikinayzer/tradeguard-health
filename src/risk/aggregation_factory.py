@@ -22,48 +22,61 @@ class AggregationFactory:
             return RiskLevel.LOW
         return RiskLevel.NONE
 
-    # TODO Even though it works, I can't really justify use of noisy-or model with dependent factors. But in
-    #  practice, works well.
+    @staticmethod
+    def calculate_composite_confidence(patterns: List[AtomicPattern]) -> float:
+        """
+        Calculate confidence for a composite pattern based on its component patterns.
+        
+        Args:
+            patterns: List of atomic patterns that form the composite
+            
+        Returns:
+            Confidence value between 0 and 1, rounded to 2 decimal places
+        """
+        if not patterns:
+            return 0.0
+            
+        # Calculate confidence as average of component severities
+        confidence = sum(p.severity for p in patterns) / len(patterns)
+        return round(confidence, 2)
+
     @staticmethod
     def calculate_aggregated_confidence(patterns: List[CompositePattern | AtomicPattern]) -> float:
         """
-        Calculate aggregated confidence using Noisy-OR method.
-        Noisy-OR is a probabilistic model for combining binary signals, which works with probability of no risk,
-        then converts back to probability of risk at the end.
-        EXAMPLE:
-        Array of possibilities: (0.7 , 0.5)
-        Formula: (1 - 0.7) × (1 - 0.5) = 0.15 => 1 - 0.15 = 0.85
-        Noisy-OR treats each pattern as a partially reliable indicator of risk.
-        With this approach:
-        - Adding a new pattern will never decrease the overall confidence
-        - Multiple weaker signals can combine to produce a stronger signal
-        - A strong signal remains strong even with weaker additional signals
+        Calculate aggregated confidence using weighted average method.
+        If composite patterns exist, only use those. Otherwise, use atomic patterns.
         
         Args:
-            patterns: List of patterns to aggregate
+            patterns: List of patterns to aggregate, each with its category weight
             
         Returns:
-            Aggregated confidence value between 0 and 1
+            Aggregated confidence value between 0 and 1, rounded to 2 decimal places
         """
         if not patterns:
             return 0.0
 
-        prob_no_risk = 1.0
+        composite_patterns = [p for p in patterns if isinstance(p, CompositePattern)]
+        atomic_patterns = [p for p in patterns if not isinstance(p, CompositePattern)]
 
-        for pattern in patterns:
-            if pattern.__class__ == CompositePattern:
-                prob_no_risk *= (1.0 - pattern.confidence)
-            else:
-                prob_no_risk *= (1.0 - pattern.severity)
-
-        return 1.0 - prob_no_risk
+        # If composite patterns, only use them
+        if composite_patterns:
+            composite_score = sum(p.confidence * p.category_weights[p.category]
+                                for p in composite_patterns) / len(composite_patterns)
+            return min(1.0, round(composite_score, 2))
+        
+        # If no composite patterns, use atomic patterns
+        if atomic_patterns:
+            atomic_score = sum(p.severity * p.category_weights[p.category]
+                             for p in atomic_patterns) / len(atomic_patterns)
+            return min(1.0, round(atomic_score, 2))
+        
+        return 0.0
 
     @staticmethod
     def aggregate(
             patterns: List[AtomicPattern],
             composite_patterns: List[CompositePattern],
             user_id: int,
-            job_id: Optional[int] = None
     ) -> RiskRepost:
 
         logger.info(f"[AggregationFactory] Starting aggregation for user {user_id}")
@@ -75,30 +88,17 @@ class AggregationFactory:
 
         category_to_patterns: Dict[RiskCategory, List[AtomicPattern | CompositePattern]] = defaultdict(list)
 
-        # Process composite patterns first (already boosted in composition logic)
         for pattern in composite_patterns:
             logger.info(f"[AggregationFactory] Processing composite pattern: {pattern.pattern_id}")
-            if not pattern.category_weights:
-                logger.info(f"[AggregationFactory] Composite pattern {pattern.pattern_id} has no category weights, assigning equal weights")
-                equal_weight = 1.0 / len(RiskCategory)
-                pattern.category_weights = {category: equal_weight for category in RiskCategory}
-            
             for category, weight in pattern.category_weights.items():
                 weighted_pattern = CompositePattern(**pattern.dict())
-                weighted_pattern.confidence *= weight  # Apply category weight, but no additional boost
                 category_to_patterns[category].append(weighted_pattern)
-                logger.info(f"[AggregationFactory] Added to category {category} with weight {weight}")
+                logger.info(
+                    f"[AggregationFactory] Added to category {category} with original confidence {weighted_pattern.confidence}")
 
-        # Then process unconsumed atomic patterns with 50% weight
         for pattern in patterns:
             if not pattern.is_composite and not pattern.consumed:
                 logger.info(f"[AggregationFactory] Processing atomic pattern: {pattern.pattern_id}")
-                if not pattern.category_weights:
-                    logger.info(f"[AggregationFactory] Atomic pattern {pattern.pattern_id} has no category weights, assigning equal weights")
-                    # Assign equal weights to all categories
-                    equal_weight = 1.0 / len(RiskCategory)
-                    pattern.category_weights = {category: equal_weight for category in RiskCategory}
-                
                 for category, weight in pattern.category_weights.items():
                     weighted_pattern = AtomicPattern(**pattern.dict())
                     # Apply 50% factor to atomic patterns to give composites higher priority
@@ -125,13 +125,13 @@ class AggregationFactory:
                 composite_patterns=composite_patterns,
                 atomic_patterns_number=atomic_patterns_number,
                 composite_patterns_number=composite_patterns_number,
-                consumed_patterns_number=consumed_patterns_number
+                consumed_patterns_number=consumed_patterns_number,
             )
 
-        # Determine the dominant category
         top_risk_type, top_confidence = max(category_scores.items(), key=lambda x: x[1])
         top_risk_level = AggregationFactory.calculate_risk_level(top_confidence)
-        logger.info(f"[AggregationFactory] Top risk: {top_risk_type} at {top_risk_level} (confidence: {top_confidence})")
+        logger.info(
+            f"[AggregationFactory] Top risk: {top_risk_type} at {top_risk_level} (confidence: {top_confidence})")
 
         return RiskRepost(
             user_id=user_id,
@@ -143,5 +143,5 @@ class AggregationFactory:
             composite_patterns=composite_patterns,
             atomic_patterns_number=atomic_patterns_number,
             composite_patterns_number=composite_patterns_number,
-            consumed_patterns_number=consumed_patterns_number
+            consumed_patterns_number=consumed_patterns_number,
         )

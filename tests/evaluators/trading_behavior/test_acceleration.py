@@ -11,12 +11,14 @@ from typing import Dict, List
 from src.models.job_models import Job
 from src.risk.evaluators.trading_behavior import TradingBehaviorEvaluator
 from src.models.risk_models import RiskCategory, AtomicPattern
+from src.state.state_manager import StateManager
 
 
 class TestAcceleration(unittest.TestCase):
     def setUp(self):
         """Set up test environment before each test method."""
-        self.evaluator = TradingBehaviorEvaluator()
+        self.state_manager = StateManager()
+        self.evaluator = TradingBehaviorEvaluator(self.state_manager)
         self.user_id = 12345
 
         # Use a fixed reference time for consistent testing

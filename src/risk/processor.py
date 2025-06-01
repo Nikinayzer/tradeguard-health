@@ -6,41 +6,37 @@ Each evaluator analyzes specific aspects of risk and sends its own report.
 """
 import json
 import queue
+import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from queue import Queue
 from threading import Thread
-from typing import Dict, List, Any, Optional, Set, Union
+from typing import List
 
 from src.models.risk_models import (
-    RiskCategory, RiskLevel, AtomicPattern, CompositePattern
+    RiskLevel, AtomicPattern
 )
-from src.models import Job
 from src.risk.aggregation_factory import AggregationFactory
 from src.risk.evaluators import create_evaluators, BaseRiskEvaluator
-from src.config.config import Config
 from src.utils.log_util import get_logger
 from src.state.state_manager import StateManager
 
 logger = get_logger()
 
 
-def _get_risk_level(confidence: float) -> RiskLevel:
-    """Convert confidence to risk level."""
-    if confidence >= 0.7:
-        return RiskLevel.CRITICAL
-    elif confidence >= 0.5:
-        return RiskLevel.HIGH
-    elif confidence >= 0.3:
-        return RiskLevel.MEDIUM
-    elif confidence > 0:
-        return RiskLevel.LOW
-    return RiskLevel.NONE
-
-
 def _evaluate_in_thread(evaluator: BaseRiskEvaluator, user_id: int) -> List[AtomicPattern]:
     """Helper method to run a single evaluator in a thread"""
-    return evaluator.evaluate(user_id)
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        if asyncio.iscoroutinefunction(evaluator.evaluate):
+            return loop.run_until_complete(evaluator.evaluate(user_id))
+        else:
+            return evaluator.evaluate(user_id)
+    finally:
+        loop.close()
 
 
 class RiskProcessor:
@@ -65,16 +61,18 @@ class RiskProcessor:
         from src.risk.pattern_composition import PatternCompositionEngine
         self.pattern_composition_engine = PatternCompositionEngine()
 
-        self.presets = {  # todo make normal presets
-        #    "limits_only": ["user_limits", "positions_evaluator"],
+        self.presets = {
+            "default": ["user_limits", "positions_evaluator"],
+            "positions_only": ["positions_evaluator"],
             "limits_only": ["user_limits"],
-            "overtrading": ["overtrading_evaluator", "time_pattern_evaluator"],
-            "daily_risk": ["portfolio_exposure_evaluator", "position_size_evaluator"],
             "all": [e.evaluator_id for e in self.evaluators.values()]
         }
 
         self.queue_thread = Thread(target=self._process_evaluations, daemon=True)
         self.queue_thread.start()
+
+        self.periodic_thread = Thread(target=self._run_periodic_evaluation, daemon=True)
+        self.periodic_thread.start()
 
         logger.info(f"Risk processor initialized.")
         logger.debug(f"Available evaluators: {', '.join(self.evaluators.keys())}")
@@ -124,13 +122,8 @@ class RiskProcessor:
         futures = {}
         all_patterns: List[AtomicPattern] = []
 
-        logger.info(f"[RiskProcessor] Starting evaluation for user {user_id} with evaluators: {evaluator_ids}")
-        logger.info(f"[RiskProcessor] Available evaluator keys: {list(self.evaluators.keys())}")
-
         for evaluator_id, evaluator in self.evaluators.items():
-            logger.info(f"[RiskProcessor] Checking evaluator: {evaluator_id} with type {type(evaluator)}")
             if evaluator_id in evaluator_ids:
-                logger.info(f"[RiskProcessor] Matched evaluator: {evaluator_id}")
                 futures[evaluator_id] = self.executor.submit(
                     _evaluate_in_thread,
                     evaluator,
@@ -152,16 +145,25 @@ class RiskProcessor:
 
         if all_patterns:
             logger.info(f"[RiskProcessor] Total patterns collected: {len(all_patterns)}")
-            
-            # Store atomic patterns - the storage will handle unique vs non-unique patterns
-            self.state_manager.pattern_storage.store_patterns(user_id, all_patterns)
-            logger.info(f"[RiskProcessor] Stored {len(all_patterns)} patterns in pattern storage")
-            
-            # Get patterns from storage to ensure we have all non-unique patterns
+
+            patterns_by_key = {}
+            for pattern in all_patterns:
+                key = (pattern.pattern_id, pattern.position_key)
+                if key not in patterns_by_key:
+                    patterns_by_key[key] = pattern
+                else:
+                    if pattern.severity > patterns_by_key[key].severity:
+                        patterns_by_key[key] = pattern
+
+            deduplicated_patterns = list(patterns_by_key.values())
+            logger.info(f"[RiskProcessor] Deduplicated patterns: {len(deduplicated_patterns)}")
+
+            self.state_manager.pattern_storage.store_patterns(user_id, deduplicated_patterns)
+            logger.info(f"[RiskProcessor] Stored {len(deduplicated_patterns)} patterns in pattern storage")
+
             stored_patterns = self.state_manager.pattern_storage.get_user_patterns(user_id)
             logger.info(f"[RiskProcessor] Retrieved {len(stored_patterns)} patterns from storage")
-            
-            # Log current state before composition
+
             try:
                 logger.info("[RiskProcessor] Getting current pattern state...")
                 unique_patterns = [p for p in stored_patterns if p.unique]
@@ -194,21 +196,15 @@ class RiskProcessor:
                         logger.info(f"[RiskProcessor] Composite pattern components: {pattern.component_patterns}")
                 else:
                     logger.info("[RiskProcessor] No composite patterns detected")
-                
-                # Get unconsumed patterns for logging purposes only
-                unconsumed_patterns = [p for p in stored_patterns if not p.consumed]
-                logger.info(f"[RiskProcessor] {len(unconsumed_patterns)} unconsumed atomic patterns remain as awareness indicators")
-                
-                # Pass patterns from storage to maintain full context including non-unique patterns
+
                 logger.info("[RiskProcessor] Starting pattern aggregation")
                 logger.info(f"[RiskProcessor] Input for aggregation:")
                 logger.info(f"  - Atomic patterns: {len(stored_patterns)}")
                 logger.info(f"  - Composite patterns: {len(composite_patterns)}")
                 report = AggregationFactory.aggregate(
-                    stored_patterns,  # Use patterns from storage to include non-unique patterns
-                    composite_patterns, # Composite patterns get priority
+                    stored_patterns,
+                    composite_patterns,
                     user_id,
-                    job_id=None
                 )
                 
                 logger.info(f"[RiskProcessor] Aggregation complete. Top risk: {report.top_risk_type} at {report.top_risk_level} (confidence: {report.top_risk_confidence})")
@@ -233,14 +229,12 @@ class RiskProcessor:
                 
             except Exception as e:
                 logger.error(f"[RiskProcessor] Error in pattern composition/aggregation: {str(e)}", exc_info=True)
-                # Fallback to original aggregation if composition fails
                 logger.info("[RiskProcessor] Attempting fallback aggregation")
                 try:
                     report = AggregationFactory.aggregate(
                         all_patterns,
-                        [], # Empty list for composite_patterns in fallback case
+                        [],
                         user_id,
-                        job_id=None
                     )
                     
                     if self.kafka_handler:
@@ -257,3 +251,17 @@ class RiskProcessor:
                     logger.error(f"[RiskProcessor] Error in fallback aggregation: {str(e)}", exc_info=True)
         
         return all_patterns
+
+    def _run_periodic_evaluation(self):
+        """Thread that runs periodic evaluation of all users' positions."""
+        logger.info("[RiskProcessor] Periodic evaluation thread started")
+        while True:
+            try:
+                all_positions = self.state_manager.position_storage.get_all_positions()
+                for user_id in all_positions.keys():
+                    self.run_preset("positions_only", user_id)
+
+                time.sleep(20) # todo 60
+            except Exception as e:
+                logger.error(f"[RiskProcessor] Error in periodic evaluation: {str(e)}", exc_info=True)
+                time.sleep(20)

@@ -74,14 +74,13 @@ class TestEarlyProfitExit(unittest.TestCase):
         self.assertEqual(len(patterns), 1, "Expected 1 pattern for early profit exit")
 
         pattern = patterns[0]
-        self.assertEqual(pattern.pattern_id, "early_profit_exit")
+        self.assertEqual(pattern.pattern_id, "position_early_profit_exit")
         self.assertEqual(pattern.details["symbol"], "BTC")
         self.assertEqual(pattern.details["venue"], "BINANCE")
         self.assertAlmostEqual(pattern.details["profit_pct"], 0.02, places=2)
 
     def test_early_profit_exit_short_position(self):
         """Test detection of early profit exit on a short position"""
-        # Create position history with small profit exit (3%)
         bybit_eth_pos = create_position(
             venue="BYBIT",
             symbol="ETH",
@@ -97,12 +96,10 @@ class TestEarlyProfitExit(unittest.TestCase):
 
         patterns = self.evaluator.check_early_profit_exit(self.user_id, position_histories)
 
-        # Verify we got 1 pattern
         self.assertEqual(len(patterns), 1, "Expected 1 pattern for early profit exit")
 
-        # Verify pattern details
         pattern = patterns[0]
-        self.assertEqual(pattern.pattern_id, "early_profit_exit")
+        self.assertEqual(pattern.pattern_id, "position_early_profit_exit")
         self.assertEqual(pattern.details["symbol"], "ETH")
         self.assertEqual(pattern.details["venue"], "BYBIT")
         self.assertAlmostEqual(pattern.details["profit_pct"], 0.03, places=2)
@@ -152,7 +149,7 @@ class TestEarlyProfitExit(unittest.TestCase):
             side="Buy",
             entry_price=50000.0,
             mark_price=51000.0,  # 2% profit
-            update_type=PositionUpdateType.SNAPSHOT  # Not a decrease/exit
+            update_type=PositionUpdateType.SNAPSHOT
         )
 
         position_histories = {
@@ -205,7 +202,7 @@ class TestEarlyProfitExit(unittest.TestCase):
         self.assertEqual(len(patterns), 1, "Expected 1 pattern for early profit exit")
 
         pattern = patterns[0]
-        self.assertEqual(pattern.pattern_id, "early_profit_exit")
+        self.assertEqual(pattern.pattern_id, "position_early_profit_exit")
         self.assertEqual(pattern.details["symbol"], "BTC")
 
 

@@ -135,7 +135,7 @@ class TestLongHoldingTime(unittest.TestCase):
 
         # Verify pattern details
         pattern = patterns[0]
-        self.assertEqual(pattern.pattern_id, "long_holding_time")
+        self.assertEqual(pattern.pattern_id, "position_long_holding_time")
         self.assertEqual(pattern.details["symbol"], "BTC")
         self.assertEqual(pattern.details["venue"], "BINANCE")
         self.assertAlmostEqual(pattern.details["holding_days"], 10.0, delta=0.1)

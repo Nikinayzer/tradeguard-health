@@ -59,7 +59,6 @@ class TestUnrealizedPnl(unittest.TestCase):
 
     def test_positive_unrealized_pnl(self):
         """Test that no patterns are created for positions with positive PnL"""
-        # Create position with positive PnL
         binance_btc_pos = create_position(
             venue="BINANCE",
             symbol="BTC",
@@ -78,7 +77,6 @@ class TestUnrealizedPnl(unittest.TestCase):
 
     def test_small_negative_unrealized_pnl(self):
         """Test that no patterns are created for positions with small negative PnL"""
-        # Create position with small negative PnL (-5%)
         binance_eth_pos = create_position(
             venue="BINANCE",
             symbol="ETH",
@@ -97,7 +95,6 @@ class TestUnrealizedPnl(unittest.TestCase):
 
     def test_significant_negative_unrealized_pnl(self):
         """Test detection of positions with significant negative PnL"""
-        # Create position with significant negative PnL (-15%)
         binance_sol_pos = create_position(
             venue="BINANCE",
             symbol="SOL",
@@ -112,11 +109,8 @@ class TestUnrealizedPnl(unittest.TestCase):
         }
 
         patterns = self.evaluator.check_unrealized_pnl(self.user_id, position_histories)
-
-        # Verify we got 1 pattern
         self.assertEqual(len(patterns), 1, "Expected 1 pattern for significant negative PnL")
 
-        # Verify pattern details
         pattern = patterns[0]
         self.assertEqual(pattern.pattern_id, "position_unrealized_pnl_threshold")
         self.assertEqual(pattern.details["symbol"], "SOL")
@@ -146,7 +140,6 @@ class TestUnrealizedPnl(unittest.TestCase):
         """Test with multiple positions, only some of which have significant negative PnL"""
         position_histories = {}
 
-        # Position 1: Significant negative PnL (should trigger pattern)
         big_loss_pos = create_position(
             venue="BINANCE",
             symbol="BTC",
@@ -157,7 +150,6 @@ class TestUnrealizedPnl(unittest.TestCase):
         )
         position_histories["BINANCE_BTC"] = [big_loss_pos]
 
-        # Position 2: Small negative PnL (should not trigger)
         small_loss_pos = create_position(
             venue="BINANCE",
             symbol="ETH",
@@ -168,7 +160,6 @@ class TestUnrealizedPnl(unittest.TestCase):
         )
         position_histories["BINANCE_ETH"] = [small_loss_pos]
 
-        # Position 3: Positive PnL (should not trigger)
         profit_pos = create_position(
             venue="BINANCE",
             symbol="DOGE",
@@ -190,9 +181,7 @@ class TestUnrealizedPnl(unittest.TestCase):
 
     def test_uses_most_recent_position(self):
         """Test that check_unrealized_pnl uses the most recent position state"""
-        # Create a history with multiple position states, newest first
-        # The newest should have a significant loss, while older ones don't
-        
+
         # Newest position (significant loss)
         current_pos = create_position(
             venue="BINANCE",
@@ -227,15 +216,14 @@ class TestUnrealizedPnl(unittest.TestCase):
         )
         
         position_histories = {
-            'BINANCE_BTC': [current_pos, older_pos, oldest_pos]  # Newest first
+            'BINANCE_BTC': [current_pos, older_pos, oldest_pos]
         }
         
         patterns = self.evaluator.check_unrealized_pnl(self.user_id, position_histories)
-        
-        # Should get a pattern for the current position's significant loss
+
         self.assertEqual(len(patterns), 1, "Expected 1 pattern based on most recent position")
         self.assertAlmostEqual(patterns[0].details["pnl_percentage"], -20.0, places=1)
 
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()

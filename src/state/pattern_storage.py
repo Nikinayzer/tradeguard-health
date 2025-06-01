@@ -25,47 +25,66 @@ class PatternStorage:
     def store_patterns(self, user_id: int, patterns: List[AtomicPattern]) -> None:
         """
         Store patterns for a user.
-        For unique patterns, overwrites existing ones with same pattern_id.
+        For unique patterns:
+        - If pattern has job_id, overwrites existing ones with same pattern_id AND job_id
+        - If pattern has positions_key, overwrites existing ones with same pattern_id AND positions_key
+        - If pattern has no positions_key, overwrites existing ones with same pattern_id
         For non-unique patterns, always adds them to the list.
-        
+
         Args:
             user_id: User ID
             patterns: List of patterns to store
         """
         with self._lock:
-            # Get existing patterns or initialize empty list
             existing_patterns = self._patterns.get(user_id, [])
-            
-            # Separate new patterns into unique and non-unique
+
             unique_patterns = [p for p in patterns if p.unique]
             non_unique_patterns = [p for p in patterns if not p.unique]
-            
-            # Handle unique patterns by overwriting existing ones with same pattern_id
+
             if unique_patterns:
+                deduplicated_unique = {}
+                for pattern in unique_patterns:
+                    # For patterns with job_id, use pattern_id and job_id for deduplication
+                    if pattern.job_id:
+                        key = (pattern.pattern_id, tuple(sorted(pattern.job_id)))
+                    else:
+                        # For patterns without job_id, use existing position-based logic
+                        key = (pattern.pattern_id, pattern.position_key)
+
+                    if key not in deduplicated_unique or pattern.start_time > deduplicated_unique[key].start_time:
+                        deduplicated_unique[key] = pattern
+
+                new_unique_keys = set(deduplicated_unique.keys())
+
                 # Keep existing patterns that are either:
-                # 1. Not unique, or
-                # 2. Unique but with a different pattern_id than any new unique pattern
+                # 1 Not unique
+                # 2 Unique but with different pattern_id
+                # 3 Unique with same pattern_id but different job_id/position_key
                 existing_patterns = [
                     p for p in existing_patterns
-                    if not p.unique or p.pattern_id not in [up.pattern_id for up in unique_patterns]
+                    if not p.unique or
+                       (
+                               (p.pattern_id,
+                                tuple(sorted(p.job_id)) if p.job_id else p.position_key)
+                               not in new_unique_keys
+                       )
                 ]
-                # Add new unique patterns
-                existing_patterns.extend(unique_patterns)
-            
-            # For non-unique patterns, simply append them to the list
-            # No filtering or deduplication for non-unique patterns
+
+                existing_patterns.extend(deduplicated_unique.values())
+
             existing_patterns.extend(non_unique_patterns)
-            
-            # Update storage with combined patterns
+
             self._patterns[user_id] = existing_patterns
-            
             self._clear_old_patterns()
 
             logger.debug(f"Stored {len(patterns)} patterns for user {user_id} "
                          f"({len(unique_patterns)} unique, {len(non_unique_patterns)} non-unique)")
             logger.debug(f"Total patterns in storage for user {user_id}: {len(existing_patterns)}")
             for pattern in existing_patterns:
-                logger.debug(f"Pattern: {pattern.pattern_id} (unique={pattern.unique}, job_id={pattern.job_id})")
+                logger.debug(f"Pattern: {pattern.pattern_id} "
+                             f"(unique={pattern.unique}, "
+                             f"positions_key={pattern.position_key}, "
+                             f"job_id={pattern.job_id})")
 
     def store_composite_patterns(self, user_id: int, patterns: List[CompositePattern]) -> None:
         """
@@ -80,7 +99,6 @@ class PatternStorage:
                 self._composite_patterns[user_id] = []
             self._composite_patterns[user_id].extend(patterns)
 
-            # Clear old patterns
             self._clear_old_patterns()
 
             logger.debug(f"Stored {len(patterns)} composite patterns for user {user_id}")
@@ -94,6 +112,7 @@ class PatternStorage:
             self._patterns[user_id] = [
                 pattern for pattern in self._patterns[user_id]
                 if pattern.is_active
+#                or (isinstance(pattern, AtomicPattern) and pattern.consumed) # todo just make dump to db instead
             ]
             if not self._patterns[user_id]:
                 del self._patterns[user_id]
@@ -131,21 +150,15 @@ class PatternStorage:
 
                 patterns = []
                 for pattern in self._patterns[user_id]:
-                    # Skip if pattern is not active (TTL expired)
                     if not pattern.is_active:
                         continue
 
-                    # For patterns with end_time, check if their time window overlaps with cutoff
                     if pattern.end_time:
-                        # Pattern is included if:
-                        # 1. It started before cutoff but ends after cutoff (overlaps)
-                        # 2. It started after cutoff
-                        if pattern.start_time <= cutoff_time and pattern.end_time >= cutoff_time:
+                        if pattern.start_time <= cutoff_time <= pattern.end_time:
                             patterns.append(pattern)
                         elif pattern.start_time >= cutoff_time:
                             patterns.append(pattern)
                     else:
-                        # For patterns without end_time, if they are active (TTL not expired), include them
                         patterns.append(pattern)
                 
                 logger.info(f"[PatternStorage] Found {len(patterns)} active patterns within timeframe")
