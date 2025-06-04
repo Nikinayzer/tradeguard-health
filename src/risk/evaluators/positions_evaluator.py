@@ -129,7 +129,10 @@ class PositionEvaluator(BaseRiskEvaluator):
 
             holding_time = current_time - first_entry_time
             holding_days = holding_time.total_seconds() / (24 * 3600)
-
+            logger.error(f"first_entry_time: {first_entry_time}")
+            logger.error(f"current_time: {current_time}")
+            logger.error(f"holding_time: {holding_time}")
+            logger.error(f"holding days: {holding_days}")
             if holding_days > self.LONG_HOLDING_DAYS_THRESHOLD:
                 try:
                     venue, symbol = position_key.split('_', 1)

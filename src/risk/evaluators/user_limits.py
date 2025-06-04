@@ -56,13 +56,11 @@ def _get_user_limits(user_id: int) -> Optional[UserLimits]:
                 "maxConcurrentOrders": data.get("maxConcurrentOrders", 5),
                 "maxDailyTrades": data.get("maxDailyTrades", 20),
                 "tradingCooldown": data.get("tradingCooldown", 5),
-                "allowDcaForce": data.get("allowDcaForce", True),
-                "allowLiqForce": data.get("allowLiqForce", True),
                 "dailyLossLimit": data.get("dailyLossLimit", 1000),
                 "maxConsecutiveLosses": data.get("maxConsecutiveLosses", 3),
                 "maxDailyBalanceChange": data.get("maxDailyBalanceChange", 0.2),
-                "volatilityLimit": data.get("volatilityLimit", 0.05),
-                "liquidityThreshold": data.get("liquidityThreshold", 1000)
+                #"volatilityLimit": data.get("volatilityLimit", 0.05),
+                #"liquidityThreshold": data.get("liquidityThreshold", 1000)
             }
 
             logger.info(f"Mapped data for UserLimits model: {mapped_data}")
