@@ -37,6 +37,7 @@ class BasePattern(BaseModel):
     pattern_id: str
     job_id: Optional[List[int]] = None
     position_key: Optional[str] = None
+    description: Optional[str] = None
     message: str
     category_weights: Optional[Dict[RiskCategory, float]] = Field(default_factory=default_category_weights)
     details: Optional[Dict[str, Any]] = None

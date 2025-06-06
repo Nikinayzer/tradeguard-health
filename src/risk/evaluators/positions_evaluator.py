@@ -12,6 +12,7 @@ from src.risk.evaluators.base import BaseRiskEvaluator
 from src.state.state_manager import StateManager
 from src.utils.log_util import get_logger
 from src.market.market_data_service import MarketDataService, KlineInterval
+from src.market.trends_service import TrendsService
 
 logger = get_logger()
 
@@ -32,7 +33,10 @@ class PositionEvaluator(BaseRiskEvaluator):
         self.VOLATILITY_THRESHOLD = 0.5  # 50% annualized volatility
         self.LIQUIDITY_THRESHOLD = 0.02  # 2% spread threshold
         self.MIN_LIQUIDITY_DEPTH = 100000  # Minimum depth
+        self.HYPE_THRESHOLD = 0.7  # Minimum hype score to consider a coin hyped (0.0-1.0)
+        self.RECENT_SPIKE_THRESHOLD = 0.5  # Minimum recent spike score to consider a coin spiking (0.0-1.0)
         self.market_data = MarketDataService()
+        self.trends_service = TrendsService()
 
     async def evaluate(self, user_id: int) -> List[AtomicPattern]:
         """
@@ -82,6 +86,12 @@ class PositionEvaluator(BaseRiskEvaluator):
                 patterns.extend(await self.check_liquidity_risk(user_id, positions))
             except Exception as e:
                 logger.error(f"[PositionEvaluator] Error in liquidity risk check: {str(e)}")
+
+            try:
+                logger.debug("[PositionEvaluator] Running hype check...")
+                patterns.extend(await self.check_coin_hype(user_id, positions))
+            except Exception as e:
+                logger.error(f"[PositionEvaluator] Error in hype check: {str(e)}")
 
             logger.info(f"[PositionEvaluator] Evaluation complete. Found {len(patterns)} patterns")
             return patterns
@@ -146,14 +156,21 @@ class PositionEvaluator(BaseRiskEvaluator):
                     violation_ratio,
                 )
 
+                message = f"Position {position_key} held for {holding_days:.1f} days"
+                description = (
+                    f"Position has been open for {holding_days:.1f} days, exceeding the {self.LONG_HOLDING_DAYS_THRESHOLD} day threshold. "
+                    f"Current unrealized PnL: {current_position.unrealized_pnl:.2f} USDT. "
+                    "Consider reviewing position exit strategy."
+                )
+
                 patterns.append(AtomicPattern(
                     pattern_id="position_long_holding_time",
                     user_id=user_id,
                     position_key=position_key,
-                    message=f"Position {position_key} held for {holding_days:.1f} days",
+                    message=message,
+                    description=description,
                     severity=severity,
                     unique=True,
-                    # category_weights={} ??,
                     ttl_minutes=60 * 24 * 7,
                     details={
                         "symbol": symbol,
@@ -198,9 +215,7 @@ class PositionEvaluator(BaseRiskEvaluator):
             if pnl_percentage >= -10:
                 continue
 
-            # PnL is worse than -10%, create a pattern
             violation_ratio = abs(pnl_percentage) / 10.0
-
             severity = self.calculate_dynamic_severity(
                 violation_ratio,
             )
@@ -212,14 +227,22 @@ class PositionEvaluator(BaseRiskEvaluator):
                 venue = position.venue
                 symbol = position.symbol
 
+            message = f"Position {position_key} has significant unrealized loss ({pnl_percentage:.2f}%)"
+            description = (
+                f"Position has unrealized loss of {pnl_percentage:.2f}% ({position.unrealized_pnl:.2f} USDT). "
+                f"Position size: {position.usdt_amt:.2f} USDT. "
+                "Consider reviewing stop-loss strategy and position sizing."
+            )
+
             patterns.append(AtomicPattern(
                 pattern_id="position_unrealized_pnl_threshold",
                 user_id=user_id,
                 position_key=position_key,
-                message=f"Position {position_key} has significant unrealized loss ({pnl_percentage:.2f}%)",
+                message=message,
+                description=description,
+                severity=severity,
                 unique=True,
                 ttl_minutes=60 * 24 * 7,
-                severity=severity,
                 details={
                     "position_key": position_key,
                     "symbol": symbol,
@@ -274,11 +297,19 @@ class PositionEvaluator(BaseRiskEvaluator):
                     continue
 
                 if 0 < profit_pct <= self.EARLY_PROFIT_THRESHOLD:
+                    message = f"Early profit exit on {symbol} ({profit_pct:.2%})"
+                    description = (
+                        f"Position was closed with a small profit of {profit_pct:.2%}. "
+                        f"Entry price: {entry_price:.2f}, Exit price: {exit_price:.2f}. "
+                        "Consider reviewing take-profit strategy to maximize gains."
+                    )
+
                     patterns.append(AtomicPattern(
                         pattern_id="position_early_profit_exit",
                         user_id=user_id,
                         position_key=position_key,
-                        message=f"Early profit exit on {symbol} ({profit_pct:.2%})",
+                        message=message,
+                        description=description,
                         severity=1.0,
                         ttl_minutes=60 * 24 * 7,
                         details={
@@ -399,11 +430,19 @@ class PositionEvaluator(BaseRiskEvaluator):
                 violation_ratio = volatility / self.VOLATILITY_THRESHOLD
                 severity = self.calculate_dynamic_severity(violation_ratio, max_violation=4.0)
 
+                message = f"Position {position_key} in high volatility market ({volatility:.1%})"
+                description = (
+                    f"Market volatility ({volatility:.1%}) exceeds threshold ({self.VOLATILITY_THRESHOLD:.1%}). "
+                    f"Position size: {current_position.usdt_amt:.2f} USDT, Unrealized PnL: {current_position.unrealized_pnl:.2f} USDT. "
+                    "Consider reducing position size or implementing tighter stop-loss."
+                )
+
                 patterns.append(AtomicPattern(
                     pattern_id="position_high_volatility",
                     user_id=user_id,
                     position_key=position_key,
-                    message=f"Position {position_key} in high volatility market ({volatility:.1%})",
+                    message=message,
+                    description=description,
                     severity=severity,
                     unique=True,
                     ttl_minutes=60 * 24,
@@ -455,7 +494,6 @@ class PositionEvaluator(BaseRiskEvaluator):
             spread = liquidity_metrics.get('spread', 0)
             depth = liquidity_metrics.get('depth', 0)
 
-            # Check if position size is significant relative to market depth
             position_size = current_position.usdt_amt
             depth_ratio = position_size / depth if depth > 0 else float('inf')
 
@@ -463,11 +501,19 @@ class PositionEvaluator(BaseRiskEvaluator):
                 violation_ratio = spread / self.LIQUIDITY_THRESHOLD
                 severity = self.calculate_dynamic_severity(violation_ratio, max_violation=4.0)
 
+                message = f"Position {position_key} in high spread market ({spread:.2%})"
+                description = (
+                    f"Market spread ({spread:.2%}) exceeds threshold ({self.LIQUIDITY_THRESHOLD:.2%}). "
+                    f"Position size: {position_size:.2f} USDT, Market depth: {depth:.2f} USDT. "
+                    "Consider reducing position size to improve execution quality."
+                )
+
                 patterns.append(AtomicPattern(
                     pattern_id="position_high_spread",
                     user_id=user_id,
                     position_key=position_key,
-                    message=f"Position {position_key} in high spread market ({spread:.2%})",
+                    message=message,
+                    description=description,
                     severity=severity,
                     unique=True,
                     ttl_minutes=60 * 24,
@@ -486,11 +532,19 @@ class PositionEvaluator(BaseRiskEvaluator):
                 violation_ratio = self.MIN_LIQUIDITY_DEPTH / depth if depth > 0 else float('inf')
                 severity = self.calculate_dynamic_severity(violation_ratio, max_violation=4.0)
 
+                message = f"Position {position_key} in low liquidity market (depth: {depth:,.0f} USDT)"
+                description = (
+                    f"Market depth ({depth:,.0f} USDT) is below minimum threshold ({self.MIN_LIQUIDITY_DEPTH:,.0f} USDT). "
+                    f"Position size: {position_size:.2f} USDT, Depth ratio: {depth_ratio:.2%}. "
+                    "Consider reducing position size to minimize market impact."
+                )
+
                 patterns.append(AtomicPattern(
                     pattern_id="position_low_liquidity",
                     user_id=user_id,
                     position_key=position_key,
-                    message=f"Position {position_key} in low liquidity market (depth: {depth:,.0f} USDT)",
+                    message=message,
+                    description=description,
                     severity=severity,
                     unique=True,
                     details={
@@ -501,6 +555,101 @@ class PositionEvaluator(BaseRiskEvaluator):
                         "threshold": self.MIN_LIQUIDITY_DEPTH,
                         "position_size": position_size,
                         "depth_ratio": depth_ratio
+                    }
+                ))
+
+        return patterns
+
+    async def check_coin_hype(self, user_id: int, position_histories: Dict[str, List[Position]]) -> List[AtomicPattern]:
+        """
+        Check if positions are in coins experiencing hype based on Google Trends data.
+        
+        Args:
+            user_id: User ID being evaluated
+            position_histories: Dictionary mapping position keys to lists of Position objects
+            
+        Returns:
+            List of patterns for positions in hyped coins
+        """
+        patterns = []
+
+        for position_key, history in position_histories.items():
+            if not history:
+                continue
+
+            current_position = history[0]
+            if current_position.qty == 0:
+                continue
+
+            try:
+                venue, symbol = position_key.split('_', 1)
+            except ValueError:
+                logger.warning(f"Invalid position key format: {position_key}")
+                continue
+
+            hype_metrics = await self.trends_service.analyze_hype_metrics(symbol)
+            if not hype_metrics:
+                continue
+
+            hype_score = hype_metrics.get('hype_score', 0.0)
+            current_interest = hype_metrics.get('current_interest', 0.0)
+            historical_avg = hype_metrics.get('historical_avg', 0.0)
+            interest_change = hype_metrics.get('interest_change', 0.0)
+            deviation_from_avg = hype_metrics.get('deviation_from_avg', 0.0)
+            is_above_average = hype_metrics.get('is_above_average', False)
+
+            if hype_score >= self.HYPE_THRESHOLD:
+                severity = min(1.0, hype_score)
+
+                if hype_score >= 0.9:
+                    message = f"Extreme hype detected for {symbol} (score: {hype_score:.2f})"
+                    description = (
+                        f"Current interest ({current_interest:.1f}) is significantly above historical average "
+                        f"({historical_avg:.1f}). Interest has changed by {interest_change:+.1f}% in the last period. "
+                        "Consider reviewing position size and risk management strategy."
+                    )
+                elif hype_score >= 0.8:
+                    message = f"High hype level for {symbol} (score: {hype_score:.2f})"
+                    description = (
+                        f"Current interest ({current_interest:.1f}) is well above historical average "
+                        f"({historical_avg:.1f}). Interest has changed by {interest_change:+.1f}% in the last period. "
+                        "Monitor position closely for potential volatility."
+                    )
+                elif hype_score >= 0.7:
+                    message = f"Significant hype for {symbol} (score: {hype_score:.2f})"
+                    description = (
+                        f"Current interest ({current_interest:.1f}) is above historical average "
+                        f"({historical_avg:.1f}). Interest has changed by {interest_change:+.1f}% in the last period. "
+                        "Be aware of increased market attention."
+                    )
+                else:
+                    message = f"Moderate hype for {symbol} (score: {hype_score:.2f})"
+                    description = (
+                        f"Current interest ({current_interest:.1f}) is slightly above historical average "
+                        f"({historical_avg:.1f}). Interest has changed by {interest_change:+.1f}% in the last period."
+                    )
+
+                patterns.append(AtomicPattern(
+                    pattern_id="position_coin_hype",
+                    user_id=user_id,
+                    position_key=position_key,
+                    message=message,
+                    description=description,
+                    severity=severity,
+                    unique=True,
+                    ttl_minutes=60 * 24,
+                    details={
+                        "position_key": position_key,
+                        "symbol": symbol,
+                        "venue": venue,
+                        "hype_score": hype_score,
+                        "current_interest": current_interest,
+                        "historical_avg": historical_avg,
+                        "interest_change": interest_change,
+                        "deviation_from_avg": deviation_from_avg,
+                        "is_above_average": is_above_average,
+                        "position_size": current_position.usdt_amt,
+                        "unrealized_pnl": current_position.unrealized_pnl
                     }
                 ))
 

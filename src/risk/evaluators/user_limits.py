@@ -57,10 +57,7 @@ def _get_user_limits(user_id: int) -> Optional[UserLimits]:
                 "maxDailyTrades": data.get("maxDailyTrades", 20),
                 "tradingCooldown": data.get("tradingCooldown", 5),
                 "dailyLossLimit": data.get("dailyLossLimit", 1000),
-                "maxConsecutiveLosses": data.get("maxConsecutiveLosses", 3),
                 "maxDailyBalanceChange": data.get("maxDailyBalanceChange", 0.2),
-                #"volatilityLimit": data.get("volatilityLimit", 0.05),
-                #"liquidityThreshold": data.get("liquidityThreshold", 1000)
             }
 
             logger.info(f"Mapped data for UserLimits model: {mapped_data}")
@@ -111,6 +108,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 user_id=user_id,
                 hours=24
             )
+
+            # Get user equity data
+            user_equity = self.state_manager.equity_storage.get_user_equity(user_id)
 
             patterns = []
 
@@ -164,6 +164,20 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                     patterns.append(pattern)
             except Exception as e:
                 logger.error(f"[UserLimitsEvaluator] Error in force job check: {str(e)}")
+
+            try:
+                logger.debug("[UserLimitsEvaluator] Running daily loss limit check...")
+                if pattern := self._check_daily_loss_limit(position_histories=position_histories, limits=user_limits):
+                    patterns.append(pattern)
+            except Exception as e:
+                logger.error(f"[UserLimitsEvaluator] Error in daily loss limit check: {str(e)}")
+
+            try:
+                logger.debug("[UserLimitsEvaluator] Running portfolio risk check...")
+                if pattern := self._check_portfolio_risk(position_histories=position_histories, user_equity=user_equity, limits=user_limits):
+                    patterns.append(pattern)
+            except Exception as e:
+                logger.error(f"[UserLimitsEvaluator] Error in portfolio risk check: {str(e)}")
 
             logger.info(f"[UserLimitsEvaluator] Evaluation complete. Found {len(patterns)} patterns")
             return patterns
@@ -413,4 +427,142 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 severity=1.0,
                 ttl_minutes=60 * 24,
             )
+        return None
+
+    def _check_daily_loss_limit(self, position_histories: Dict[str, List[Position]], limits: UserLimits) -> Optional[AtomicPattern]:
+        """
+        Check if daily loss exceeds the user's defined limit.
+        
+        Args:
+            position_histories: Dictionary mapping position keys to lists of Position objects
+            limits: User limits containing daily_loss_limit
+            
+        Returns:
+            AtomicPattern if limit is exceeded, None otherwise
+        """
+        logger.info("[UserLimitsEvaluator] Checking daily loss limits")
+        if not limits or not hasattr(limits, 'daily_loss_limit') or not limits.daily_loss_limit:
+            logger.warning("Missing or invalid daily loss limit, skipping check")
+            return None
+
+        total_daily_loss = 0.0
+        affected_positions = []
+
+        for position_key, history in position_histories.items():
+            if not history:
+                continue
+
+            current_position = history[0]
+            if current_position.qty == 0:
+                continue
+
+            # Only unrealized losses
+            if current_position.unrealized_pnl < 0:
+                total_daily_loss += abs(current_position.unrealized_pnl)
+                affected_positions.append({
+                    "position_key": position_key,
+                    "unrealized_pnl": current_position.unrealized_pnl,
+                    "position_size": current_position.usdt_amt
+                })
+
+        if total_daily_loss > limits.daily_loss_limit:
+            violation_ratio = total_daily_loss / limits.daily_loss_limit
+            severity = self.calculate_dynamic_severity(violation_ratio)
+
+            message = f"Daily loss limit exceeded (${total_daily_loss:.2f})"
+            description = (
+                f"Total daily unrealized losses (${total_daily_loss:.2f}) exceed the limit of ${limits.daily_loss_limit:.2f}. "
+                f"Affected positions: {len(affected_positions)}. "
+                "Consider reviewing position sizes and risk management strategy."
+            )
+
+            return AtomicPattern(
+                pattern_id="limit_daily_loss",
+                message=message,
+                description=description,
+                severity=severity,
+                unique=True,
+                ttl_minutes=60 * 24,
+                details={
+                    "total_daily_loss": total_daily_loss,
+                    "limit": limits.daily_loss_limit,
+                    "violation_ratio": violation_ratio,
+                    "affected_positions": affected_positions
+                }
+            )
+
+        return None
+
+    def _check_portfolio_risk(self, position_histories: Dict[str, List[Position]], user_equity: Dict[str, Any], limits: UserLimits) -> Optional[AtomicPattern]:
+        """
+        Check if any position size exceeds the maximum portfolio risk percentage.
+        
+        Args:
+            position_histories: Dictionary mapping position keys to lists of Position objects
+            user_equity: Dictionary mapping venues to equity data
+            limits: User limits containing max_portfolio_risk
+            
+        Returns:
+            AtomicPattern if limit is exceeded, None otherwise
+        """
+        logger.info("[UserLimitsEvaluator] Checking portfolio risk limits")
+        if not limits or not hasattr(limits, 'max_portfolio_risk') or not limits.max_portfolio_risk:
+            logger.warning("Missing or invalid portfolio risk limit, skipping check")
+            return None
+
+        total_portfolio_value = sum(equity.get('wallet_balance', 0.0) for equity in user_equity.values())
+
+        if total_portfolio_value <= 0:
+            logger.warning("Total portfolio value is zero or negative, skipping portfolio risk check")
+            return None
+
+        position_risks = []
+
+        for position_key, history in position_histories.items():
+            if not history:
+                continue
+
+            current_position = history[0]
+            if current_position.qty == 0:
+                continue
+
+            position_value = current_position.usdt_amt
+            risk_percentage = position_value / total_portfolio_value
+
+            position_risks.append({
+                "position_key": position_key,
+                "position_value": position_value,
+                "risk_percentage": risk_percentage
+            })
+
+        for position_risk in position_risks:
+            if position_risk["risk_percentage"] > limits.max_portfolio_risk:
+                violation_ratio = position_risk["risk_percentage"] / limits.max_portfolio_risk
+                severity = self.calculate_dynamic_severity(violation_ratio)
+
+                message = f"Portfolio risk limit exceeded for position {position_risk['position_key']}"
+                description = (
+                    f"Position size (${position_risk['position_value']:.2f}) represents "
+                    f"{position_risk['risk_percentage']:.1%} of total portfolio (${total_portfolio_value:.2f}), "
+                    f"exceeding the limit of {limits.max_portfolio_risk:.1%}. "
+                    "Consider reducing position size to maintain proper portfolio diversification."
+                )
+
+                return AtomicPattern(
+                    pattern_id="limit_portfolio_risk",
+                    message=message,
+                    description=description,
+                    severity=severity,
+                    unique=True,
+                    ttl_minutes=60 * 24,
+                    details={
+                        "position_key": position_risk["position_key"],
+                        "position_value": position_risk["position_value"],
+                        "total_portfolio_value": total_portfolio_value,
+                        "risk_percentage": position_risk["risk_percentage"],
+                        "limit": limits.max_portfolio_risk,
+                        "violation_ratio": violation_ratio
+                    }
+                )
+
         return None

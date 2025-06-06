@@ -119,7 +119,7 @@ class PatternCompositionEngine:
         """Initialize default composition rules for common biases."""
         # Overconfidence
         self.rules.append(CompositePatternRule(
-            rule_id="extensive trading",
+            rule_id="extensive_trading",
             pattern_requirements={
                 "limit_daily_trades_count": "1",
                 "limit_cooldown": "1+",
@@ -146,8 +146,7 @@ class PatternCompositionEngine:
                     "This may indicate overconfidence or impulsive trading behavior. "
                     "Consider reviewing your trading strategy to avoid excessive trading activity."
         ))
-
-        # Risk-seeking
+        # Risk-seeking (holding losing positions too long)
         self.rules.append(CompositePatternRule(
             rule_id="risk_seeking",
             pattern_requirements={
@@ -155,21 +154,21 @@ class PatternCompositionEngine:
                 "position_unrealized_pnl_threshold": "1"
             },
             category=RiskCategory.LOSS_BEHAVIOR,
-            time_window_minutes=1440 * 7,
+            time_window_minutes=60 * 24 * 7,
             position_specific=True,
             message="One or more long-held positions with significant unrealized PnL. "
                     "This may indicate risk-seeking behavior. "
                     "Consider reviewing your trading strategy "
                     "to ensure you are not holding onto positions with high risk for too long."
         ))
-        # Risk-aversion
+        # Risk-aversion (premature profit-taking)
         self.rules.append(CompositePatternRule(
             rule_id="cutting_profits",
             pattern_requirements={
                 "position_early_profit_exit": "3"
             },
             category=RiskCategory.LOSS_BEHAVIOR,
-            time_window_minutes=1440 * 7,
+            time_window_minutes=60 * 24 * 7,
             message=f"Multiple early profit exits detected. This may indicate risk-averse behavior. "
                     f"Consider reviewing your trading strategy to ensure you are not exiting profitable"
                     f" positions too early."
@@ -179,28 +178,29 @@ class PatternCompositionEngine:
             rule_id="position_size_equity_ratio",
             pattern_requirements={
                 "position_low_liquidity": "1",
+                # ?
                 "position_size_equity_ratio": "1"
             },
             category=RiskCategory.FOMO,
             position_specific=True,
-            time_window_minutes=1440 * 7,
+            time_window_minutes=60 * 24 * 7,
             message="High investment in illiquid coin found. Consider reviewing your portfolio allocation. "
         ))
         # Availability Heuristic
-        # self.rules.append(CompositePatternRule(
-        #     rule_id="availability_heuristic",
-        #     pattern_requirements={
-        #         "position_high_volatility": "1",
-        #         # "position_news_spike": "1",
-        #     },
-        #     category=RiskCategory.FOMO,
-        #     position_specific=True,
-        #     time_window_minutes=1440 * 7,
-        #     sequence_matters=False,
-        #     message="Recent high and low prices with volume spikes detected. "
-        #             "This may indicate availability heuristic bias. "
-        #             "Consider reviewing your strategy to avoid making decisions based on recent price movements."
-        # ))
+        self.rules.append(CompositePatternRule(
+            rule_id="availability_heuristic",
+            pattern_requirements={
+                "position_high_volatility": "1",
+                "position_coin_hype": "1"
+            },
+            category=RiskCategory.FOMO,
+            position_specific=True,
+            time_window_minutes=1440 * 7,
+            sequence_matters=False,
+            message="Recent high and low prices with volume spikes detected. "
+                    "This may indicate availability heuristic bias. "
+                    "Consider reviewing your strategy to avoid making decisions based on recent price movements."
+        ))
 
     def add_rule(self, rule: CompositePatternRule):
         """Add a new composition rule to the engine."""

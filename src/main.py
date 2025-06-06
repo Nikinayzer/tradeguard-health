@@ -179,7 +179,6 @@ class TradeGuardHealth:
                 if count % 1000 == 0:
                     logger.info(f"Processed {count} historical events...")
 
-            # Get final state counts
             jobs_state = self.state_manager.job_storage.get_jobs_state()
             dca_jobs = self.state_manager.job_storage.get_dca_jobs()
             liq_jobs = self.state_manager.job_storage.get_liq_jobs()
@@ -241,7 +240,6 @@ class TradeGuardHealth:
         """Main application loop."""
         logger.info("TradeGuard Health service is running")
 
-        # Setup signal handlers for graceful shutdown
         def signal_handler(sig, frame):
             logger.info("Shutdown signal received, stopping service...")
             self.stop()
@@ -287,7 +285,6 @@ class TradeGuardHealth:
         """Stop the service and clean up resources."""
         logger.info("Stopping TradeGuard Health service...")
 
-        # Close the Kafka handlers
         try:
             if hasattr(self, 'job_handler') and self.job_handler:
                 self.job_handler.close()
@@ -303,7 +300,6 @@ class TradeGuardHealth:
         except Exception as e:
             logger.error(f"Error closing Kafka handlers: {e}", exc_info=True)
 
-        # Stop dashboards if running
         if self.web_dashboard:
             try:
                 self.web_dashboard.stop_server()
