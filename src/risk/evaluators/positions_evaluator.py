@@ -638,6 +638,9 @@ class PositionEvaluator(BaseRiskEvaluator):
                     severity=severity,
                     unique=True,
                     ttl_minutes=60 * 24,
+                    category_weights={
+                        RiskCategory.FOMO: 0.8,
+                    },
                     details={
                         "position_key": position_key,
                         "symbol": symbol,

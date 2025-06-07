@@ -16,13 +16,8 @@ class UserLimits(BaseModel):
     maxConcurrentOrders: int
     maxDailyTrades: int
     tradingCooldown: int
-    allowDcaForce: bool
-    allowLiqForce: bool
     dailyLossLimit: float
-    maxConsecutiveLosses: int
     maxDailyBalanceChange: float
-    volatilityLimit: float
-    liquidityThreshold: float
 
     @property
     def user_id(self) -> int:
@@ -64,16 +59,6 @@ class UserLimits(BaseModel):
         """Alias for maxSingleJobLimit"""
         return self.maxSingleJobLimit
 
-    @property
-    def allowed_strategies(self) -> List[str]:
-        """Convert boolean flags to list of allowed strategies"""
-        strategies = []
-        if self.allowDcaForce:
-            strategies.append("dca")
-        if self.allowLiqForce:
-            strategies.append("liq")
-        return strategies
-
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "UserLimits":
         """Create a UserLimits instance from a dictionary."""
@@ -82,5 +67,3 @@ class UserLimits(BaseModel):
     def to_dict(self) -> Dict[str, Any]:
         """Convert the model to a dictionary."""
         return self.model_dump()
-
-

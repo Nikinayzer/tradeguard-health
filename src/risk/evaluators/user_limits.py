@@ -202,6 +202,10 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 message=f"Maximum amount for job {job.id} exceeded",
                 severity=severity,
                 unique=True,
+                category_weights={
+                    RiskCategory.OVERCONFIDENCE: 0.4,
+                    RiskCategory.FOMO: 0.4,
+                },
                 ttl_minutes=60 * 24,
                 details={
                     "actual": job.amount,
@@ -349,6 +353,10 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 message=f"Cooldown between strategies {current_job.id} and {previous_job.id} was violated",
                 severity=severity,
                 unique=True,
+                category_weights={
+                    RiskCategory.OVERCONFIDENCE: 0.4,
+                    RiskCategory.FOMO: 0.4,
+                },
                 ttl_minutes=60 * 24,
                 details={
                     "actual_interval_minutes": round(minutes_diff, 2),
@@ -405,6 +413,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 ttl_minutes=60 * 24,
                 start_time=open_jobs[0].timestamp,
                 end_time=open_jobs[-1].timestamp,
+                category_weights={
+                    RiskCategory.FOMO: 0.5,
+                },
                 details={
                     "actual": open_jobs_count,
                     "limit": max_concurrent,
@@ -424,6 +435,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 job_id=[job.id],
                 unique=True,
                 message=f"Job {job.id} has force parameter.",
+                category_weights={
+                    RiskCategory.OVERCONFIDENCE: 0.8,
+                },
                 severity=1.0,
                 ttl_minutes=60 * 24,
             )
@@ -483,6 +497,9 @@ class UserLimitsEvaluator(BaseRiskEvaluator):
                 severity=severity,
                 unique=True,
                 ttl_minutes=60 * 24,
+                category_weights={
+                    RiskCategory.LOSS_BEHAVIOR: 0.7,
+                },
                 details={
                     "total_daily_loss": total_daily_loss,
                     "limit": limits.daily_loss_limit,

@@ -58,10 +58,12 @@ class AggregationFactory:
         composite_patterns = [p for p in patterns if isinstance(p, CompositePattern)]
         atomic_patterns = [p for p in patterns if not isinstance(p, CompositePattern)]
 
-        # If composite patterns, only use them
+        # If composite patterns, only use them (MAX confidence)
         if composite_patterns:
-            composite_score = sum(p.confidence * p.category_weights[p.category]
-                                for p in composite_patterns) / len(composite_patterns)
+            composite_score = max(
+                p.confidence * p.category_weights[p.category]
+                for p in composite_patterns
+            )
             return min(1.0, round(composite_score, 2))
         
         # If no composite patterns, use atomic patterns

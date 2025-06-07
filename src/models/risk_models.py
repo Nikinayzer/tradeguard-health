@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 from typing import List, Dict, Any, Optional,Literal, cast
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from src.utils import log_util
 
@@ -123,6 +123,40 @@ class AtomicPattern(BasePattern):
     def confidence(self) -> float:
         """Legacy compatibility property."""
         return self.severity
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_category_weights(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure category_weights sum to 1.0 by distributing unassigned weight across missing categories."""
+        raw_weights = values.get("category_weights")
+
+        # If not provided, default factory will handle it
+        if not raw_weights:
+            return values
+
+        all_categories = set(RiskCategory)
+        provided_weights = {RiskCategory(cat): weight for cat, weight in raw_weights.items()}
+        specified = set(provided_weights.keys())
+        missing = all_categories - specified
+
+        total = sum(provided_weights.values())
+
+        if total > 1.0:
+            raise ValueError(f"Total category weights cannot exceed 1.0 (got {total:.2f})")
+
+        # Distribute remaining weight if needed
+        if missing:
+            remaining = 1.0 - total
+            distributed = remaining / len(missing) if remaining > 0 else 0.0
+            for cat in missing:
+                provided_weights[cat] = distributed
+
+        # Ensure all categories are present
+        for cat in all_categories:
+            provided_weights.setdefault(cat, 0.0)
+
+        values["category_weights"] = provided_weights
+        return values
 
 
 class CompositePattern(BasePattern):
